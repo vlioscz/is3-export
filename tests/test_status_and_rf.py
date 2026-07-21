@@ -18,6 +18,7 @@ from custom_components.is3_export.const import DOMAIN
 from custom_components.is3_export.export import (
     enabled_by_default,
     is_battery_input,
+    is_press_button,
     module_of,
     parse_export,
     platform_of,
@@ -81,3 +82,11 @@ def test_low_battery_input_is_a_battery_sensor(export) -> None:
     assert sensor.device_class == BinarySensorDeviceClass.BATTERY
     # It is a real reading worth seeing, so it stays enabled.
     assert enabled_by_default(battery) is True
+
+
+def test_rf_remote_buttons_get_a_press_event_but_the_battery_does_not(export) -> None:
+    """An RF fob's buttons carry a long press like a wall switch; its battery
+    flag is an input too, but not a button."""
+    assert is_press_button(export.by_address(0x010100B1))  # Fob_open (IN1)
+    assert is_press_button(export.by_address(0x010100B2))  # Fob_close (IN2)
+    assert not is_press_button(export.by_address(0x010100B0))  # Battery_LOW

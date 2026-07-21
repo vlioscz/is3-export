@@ -1,11 +1,16 @@
 """Event platform for the IS3 Export integration.
 
-A wall switch button carries a second function on a long press -- held two
-seconds or more -- that iNELS acts on but cannot put in the export, since it is
-not a physical channel.  The unit does report the input going on and off, though,
-so the length of the press can be measured here: a press that outlasts the
-threshold is fired as a long press the moment it crosses it, the way iNELS
-reacts, and a shorter one as a short press when the button is let go.
+A wall switch button, and an RF remote's, carries a second function on a long
+press -- held two seconds or more -- that iNELS acts on but cannot put in the
+export, since it is not a physical channel.  The unit does report the input
+going on and off, though, so the length of the press can be measured here: a
+press that outlasts the threshold is fired as a long press the moment it
+crosses it, the way iNELS reacts, and a shorter one as a short press when the
+button is let go.
+
+Both were confirmed on a live unit: a wall switch, and an RF fob whose receiver
+reports the button on and off the same way -- a tap read under a tenth of a
+second, a hold several seconds.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ from homeassistant.helpers.event import async_call_later
 
 from .coordinator import Is3ConfigEntry, Is3Coordinator
 from .entity import Is3Entity
-from .export import Is3Entry, is_wsb_button
+from .export import Is3Entry, is_press_button
 
 SHORT_PRESS = "short_press"
 LONG_PRESS = "long_press"
@@ -31,12 +36,12 @@ async def async_setup_entry(
     entry: Is3ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Create a press event for every wall switch button."""
+    """Create a press event for every wall switch and RF remote button."""
     coordinator = entry.runtime_data
     async_add_entities(
         Is3ButtonEvent(coordinator, item)
         for item in coordinator.data.export.entries
-        if is_wsb_button(item)
+        if is_press_button(item)
     )
 
 

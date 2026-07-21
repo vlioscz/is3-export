@@ -19,7 +19,7 @@ from custom_components.is3_export.event import (
 )
 from custom_components.is3_export.export import (
     expected_entities,
-    is_wsb_button,
+    is_press_button,
     parse_export,
 )
 
@@ -34,10 +34,10 @@ def export_fixture():
 
 def test_wsb_buttons_are_the_digital_inputs(export) -> None:
     """Buttons are a switch's digital inputs -- not its LEDs or thermometers."""
-    assert is_wsb_button(export.by_address(0x01010070))  # rocker
-    assert is_wsb_button(export.by_address(0x01010072))  # DIN1
-    assert not is_wsb_button(export.by_address(0x0102006A))  # green LED (relay)
-    assert not is_wsb_button(export.by_address(0x01050001))  # thermometer
+    assert is_press_button(export.by_address(0x01010070))  # rocker
+    assert is_press_button(export.by_address(0x01010072))  # DIN1
+    assert not is_press_button(export.by_address(0x0102006A))  # green LED (relay)
+    assert not is_press_button(export.by_address(0x01050001))  # thermometer
 
 
 def test_expected_entities_lists_a_press_event_per_button(export) -> None:

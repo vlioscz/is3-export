@@ -760,7 +760,7 @@ def expected_entities(export: Is3Export, entry_id: str) -> set[tuple[str, str]]:
         platform = platform_of(entry)
         if platform is not None:
             expected.add((platform, f"{entry_id}_{entry.unique_id}"))
-        if is_wsb_button(entry):
+        if is_press_button(entry):
             expected.add((PLATFORM_EVENT, f"{entry_id}_{entry.unique_id}_event"))
     return expected
 
@@ -944,18 +944,23 @@ def module_of(entry: Is3Entry) -> tuple[str, str] | None:
     return model, match["serial"]
 
 
-def is_wsb_button(entry: Is3Entry) -> bool:
-    """Whether the entry is a wall switch's button input.
+def is_press_button(entry: Is3Entry) -> bool:
+    """Whether the entry is a button whose press length carries meaning.
 
-    A WSB button carries a long press -- held two seconds or more -- that iNELS
-    acts on but the export cannot describe, because it is not a physical channel.
-    It can still be told apart from an ordinary press by how long the input stays
-    on, so these inputs get an event entity that reports both.
+    A wall switch input, or an RF remote's, carries a long press -- held two
+    seconds or more -- that iNELS acts on but the export cannot describe, since
+    it is not a physical channel.  It can still be told apart from an ordinary
+    press by how long the input stays on, so these inputs get an event entity
+    that reports both.  A remote's low-battery flag is an input too, but not a
+    button, so it is left out.
     """
     module = module_of(entry)
-    if module is None or not module[0].startswith("WSB"):
+    if module is None:
         return False
-    return _class_of(entry) in BINARY
+    model = module[0]
+    if not (model.startswith("WSB") or model == "RFKEY"):
+        return False
+    return _class_of(entry) in BINARY and not is_battery_input(entry)
 
 
 def is_battery_input(entry: Is3Entry) -> bool:

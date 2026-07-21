@@ -202,6 +202,10 @@ pozná se z délky sepnutí vstupu a vystřelí ve chvíli překročení prahu, 
 v iNELS — dá se na něj navázat automatizace. (Vyžaduje zapnuté události
 `Digital_IN_SwitchOn` i `SwitchOff` v IDM3.)
 
+Totéž platí pro tlačítka **RF ovladačů** (`RFKEY`) — ověřeno i na klíčence:
+přijímač hlásí sepnutí i rozepnutí (ťuknutí ~0,1 s, dlouhý stisk sekundy). Stav
+baterie ovladače entitu `event` nedostane.
+
 ### Rozdělení na zařízení
 
 Každý **fyzický modul** (podle sériového čísla v hardwarovém ID) je v HA
