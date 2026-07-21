@@ -1,0 +1,8 @@
+# The parser itself is pure standard library, but importing it goes through the
+# integration package, which imports Home Assistant.
+homeassistant>=2024.12.0
+pytest>=8.0.0
+
+# pytest-homeassistant-custom-component is needed once there are tests for the
+# config flow or the coordinator. It is POSIX-only (it imports fcntl), so it
+# cannot be installed on a Windows development machine.

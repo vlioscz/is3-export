@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "iNELS central unit (CU3)",
+        "description": "First enable the third-party protocol in iNELS IDM3 (Central unit configuration → Third part setting), note the port, and tick the events the unit should send. Nothing works until that is done.\n\nThe port, delimiter and number base below must match what is set there. Leave the export file path empty to download the export from the unit. A password is only needed if the unit's web server is protected — the ASCII port itself has none.",
+        "data": {
+          "host": "Host",
+          "port": "ASCII port (from IDM3)",
+          "export_file": "Export file path (leave empty to download)",
+          "password": "Password (only if protected)",
+          "delimiter": "Delimiter (from IDM3)",
+          "number_base": "Number base (from IDM3)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the ASCII port. Check that the third-party protocol is enabled in IDM3 and that the port matches.",
+      "invalid_auth": "The unit requires a password, or rejected the one given",
+      "invalid_export": "The export could not be read or contains no entries",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This central unit is already configured"
+    }
+  }
+}

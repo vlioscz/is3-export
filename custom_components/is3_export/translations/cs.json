@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Centrální jednotka iNELS (CU3)",
+        "description": "Nejdřív povol protokol třetích stran v iNELS IDM3 (Konfigurace centrální jednotky → Third part setting), poznamenej si port a zaškrtej události, které má jednotka posílat. Bez toho nebude fungovat nic.\n\nPort, oddělovač a číselná soustava níže musí odpovídat tomu, co je nastavené tam. Když necháš cestu k exportu prázdnou, stáhne se z jednotky. Heslo je potřeba jen tehdy, když je webserver jednotky zaheslovaný — samotný ASCII port heslo nemá.",
+        "data": {
+          "host": "Adresa",
+          "port": "ASCII port (z IDM3)",
+          "export_file": "Cesta k exportnímu souboru (prázdné = stáhnout)",
+          "password": "Heslo (jen pokud je zaheslováno)",
+          "delimiter": "Oddělovač (z IDM3)",
+          "number_base": "Číselná soustava (z IDM3)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "ASCII port není dostupný. Zkontroluj, že je v IDM3 povolený protokol třetích stran a že port souhlasí.",
+      "invalid_auth": "Jednotka vyžaduje heslo, nebo zadané odmítla",
+      "invalid_export": "Export se nepodařilo přečíst nebo neobsahuje žádné položky",
+      "unknown": "Neočekávaná chyba"
+    },
+    "abort": {
+      "already_configured": "Tato centrální jednotka už je nastavená"
+    }
+  }
+}
