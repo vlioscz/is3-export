@@ -71,11 +71,15 @@ Ručně: zkopíruj `custom_components/is3_export` do `config/custom_components/`
 | Host | IP adresa jednotky | — |
 | ASCII port | **z IDM3** | `22272` |
 | Export file path | nech prázdné, stáhne se z jednotky | prázdné |
-| Heslo | jen když je webserver jednotky zaheslovaný | prázdné |
 | Oddělovač | **z IDM3**, nabízí všech 27 možností | mezera `[32]` |
 | Číselná soustava | **z IDM3** | hexadecimální |
 
 Název integrace se vezme z hlavičky exportu.
+
+**Heslo se nezadává.** Export servíruje webserver jednotky jako statický soubor
+bez přihlášení, takže **heslo projektu iNELS na jeho dostupnost nemá vliv**.
+(Kdyby přesto nějaká jednotka stažení blokovala, zadej cestu k lokálně
+staženému exportu.)
 
 Když entity hlásí *odhadovaný stav*, sedí ti špatně **oddělovač**.
 

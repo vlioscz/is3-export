@@ -9,7 +9,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT
+from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import Is3Client, Is3ConnectionError
@@ -42,10 +42,10 @@ STEP_USER_SCHEMA = vol.Schema(
         # one in IDM3 -- so it must be entered, not assumed.
         vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
         vol.Optional(CONF_EXPORT_FILE, default=""): str,
-        # Only needed when the unit's web server is password protected. The
-        # ASCII port itself takes no credentials.  The HTTP port is fixed at 80
-        # and the unit has no separate username, so neither is asked for.
-        vol.Optional(CONF_PASSWORD, default=""): str,
+        # No credentials are asked for: the unit serves the export as a static
+        # file over HTTP on port 80, without authentication, so the iNELS
+        # project password does not gate it.  A unit that somehow blocks the
+        # download can still be set up from a local export file.
         # These two must match the "Third part setting" page in IDM3.
         vol.Optional(CONF_DELIMITER, default=DELIMITER_SPACE): vol.In(DELIMITERS),
         vol.Optional(CONF_NUMBER_BASE, default=BASE_HEX): vol.In(NUMBER_BASES),
@@ -70,8 +70,10 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 export = await self._async_load_export(user_input)
             except Is3ExportAuthError as err:
-                _LOGGER.debug("Export needs credentials: %s", err)
-                errors[CONF_PASSWORD] = "invalid_auth"
+                # This unit's export is unprotected; a unit that blocks the
+                # download must be set up from a local export file instead.
+                _LOGGER.debug("Export is protected: %s", err)
+                errors[CONF_EXPORT_FILE] = "invalid_auth"
             except Is3ExportError as err:
                 _LOGGER.debug("Cannot load export: %s", err)
                 errors[CONF_EXPORT_FILE] = "invalid_export"
@@ -117,12 +119,9 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
         if path := user_input.get(CONF_EXPORT_FILE, "").strip():
             return await self.hass.async_add_executor_job(read_export_file, Path(path))
 
-        # The unit serves the export over plain HTTP on port 80 and has no
-        # username; only the password may be set.
+        # The unit serves the export over plain HTTP on port 80, unauthenticated.
         return await async_fetch_export(
             async_get_clientsession(self.hass),
             user_input[CONF_HOST],
             DEFAULT_HTTP_PORT,
-            None,
-            user_input.get(CONF_PASSWORD) or None,
         )

@@ -6,7 +6,6 @@ from pathlib import Path
 
 from homeassistant.const import (
     CONF_HOST,
-    CONF_PASSWORD,
     CONF_PORT,
     Platform,
 )
@@ -70,11 +69,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: Is3ConfigEntry) -> bool:
         client,
         Path(configured_path) if configured_path else None,
         host=entry.data[CONF_HOST],
-        # HTTP is fixed at port 80 and the unit has no username; only the
-        # password is configurable.
+        # The export is fetched over plain HTTP on port 80, unauthenticated.
         http_port=DEFAULT_HTTP_PORT,
-        username=None,
-        password=entry.data.get(CONF_PASSWORD) or None,
     )
 
     try:
