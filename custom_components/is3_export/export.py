@@ -294,11 +294,12 @@ PLATFORM_SWITCH = "switch"
 PLATFORM_NUMBER = "number"
 PLATFORM_BINARY_SENSOR = "binary_sensor"
 PLATFORM_SENSOR = "sensor"
-# Covers and climate zones are assembled from several entries, not returned by
-# platform_of.
+# Covers, climate zones and button events are assembled from entries or ride
+# alongside them, rather than being returned by platform_of.
 PLATFORM_COVER = "cover"
 PLATFORM_CLIMATE = "climate"
 PLATFORM_SELECT = "select"
+PLATFORM_EVENT = "event"
 
 
 def name_tokens(entry: Is3Entry) -> list[str]:
@@ -759,6 +760,8 @@ def expected_entities(export: Is3Export, entry_id: str) -> set[tuple[str, str]]:
         platform = platform_of(entry)
         if platform is not None:
             expected.add((platform, f"{entry_id}_{entry.unique_id}"))
+        if is_wsb_button(entry):
+            expected.add((PLATFORM_EVENT, f"{entry_id}_{entry.unique_id}_event"))
     return expected
 
 
@@ -939,6 +942,20 @@ def module_of(entry: Is3Entry) -> tuple[str, str] | None:
     if model == "Controller" or model.startswith("In-Out"):
         return None
     return model, match["serial"]
+
+
+def is_wsb_button(entry: Is3Entry) -> bool:
+    """Whether the entry is a wall switch's button input.
+
+    A WSB button carries a long press -- held two seconds or more -- that iNELS
+    acts on but the export cannot describe, because it is not a physical channel.
+    It can still be told apart from an ordinary press by how long the input stays
+    on, so these inputs get an event entity that reports both.
+    """
+    module = module_of(entry)
+    if module is None or not module[0].startswith("WSB"):
+        return False
+    return _class_of(entry) in BINARY
 
 
 # Roles always worth showing even when the installer left them unnamed, because

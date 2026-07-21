@@ -196,6 +196,12 @@ vyplyne to z typu adresy:
 | **WSB3-40** | 12 — 4 tlačítka + 4 LED + 2 teploty + 2 dig. vstupy |
 | **WSB3-*-Hum** | +2 — vlhkost (`%`, `device_class humidity`) a rosný bod (°C) |
 
+Každé tlačítko (Up/Down/DIN) má navíc **`event` entitu** s typy `short_press` a
+`long_press`. Dlouhý stisk (držení **≥ 2 s**) se do exportu nedá zapsat, ale
+pozná se z délky sepnutí vstupu a vystřelí ve chvíli překročení prahu, jako
+v iNELS — dá se na něj navázat automatizace. (Vyžaduje zapnuté události
+`Digital_IN_SwitchOn` i `SwitchOff` v IDM3.)
+
 ### Rozdělení na zařízení
 
 Každý **fyzický modul** (podle sériového čísla v hardwarovém ID) je v HA
