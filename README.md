@@ -199,10 +199,14 @@ vyplyne to z typu adresy:
 Tlačítka (Up/Down/DIN) jsou **`event` entita**, ne binary_sensor — jsou
 **momentální**, takže je zbytečné (a problematické) držet u nich stav On/Off,
 který se zasekne, když se ztratí událost o rozepnutí. Event má typy
-`short_press` a `long_press`. Dlouhý stisk (držení **≥ 2 s**) se do exportu
-nedá zapsat, ale pozná se z délky sepnutí a vystřelí ve chvíli překročení prahu,
-jako v iNELS. (Vyžaduje zapnuté události `Digital_IN_SwitchOn` i `SwitchOff`
-v IDM3. Kdyby se rozepnutí přesto ztratilo, vstup se po ~10 s sám srovná.)
+`short_press` a `long_press`.
+
+Krátký/dlouhý stisk se pozná z **délky držení**, vyhodnotí se **při puštění**.
+Práh pro dlouhý stisk je **≥ 3 s** — výš než v iNELS schválně: jednotka hlásí
+rozepnutí s **proměnlivým zpožděním** (viděné ~2 s i u rychlého ťuknutí), takže
+nižší práh by krátké ťuknutí spletl s dlouhým. Vyžaduje zapnuté události
+`Digital_IN_SwitchOn` i `SwitchOff` v IDM3. Ztracené rozepnutí (u RF) nevystřelí
+nic (krátký a dlouhý už nejdou rozlišit) a vstup se po ~10 s sám srovná.
 
 Totéž platí pro tlačítka **RF ovladačů** (`RFKEY`) — ověřeno i na klíčence:
 přijímač hlásí sepnutí i rozepnutí (ťuknutí ~0,1 s, dlouhý stisk sekundy). Stav
