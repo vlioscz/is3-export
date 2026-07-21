@@ -63,6 +63,9 @@ def _coordinator(clock: _Clock) -> Is3Coordinator:
     coord._pending = {}
     coord._updated_at = {}
     coord._listeners = {}
+    coord._throttled = frozenset()
+    coord._notified_at = {}
+    coord._flush_scheduled = set()
     return coord
 
 

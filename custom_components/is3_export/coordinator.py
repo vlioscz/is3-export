@@ -25,7 +25,13 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import Is3Client, Is3Error
 from .const import DEFAULT_SCAN_INTERVAL, DOMAIN, EXPORT_RELOAD_INTERVAL
-from .export import Is3Export, is_readable, is_writable
+from .export import (
+    PLATFORM_SENSOR,
+    Is3Export,
+    is_readable,
+    is_writable,
+    platform_of,
+)
 from .source import (
     Is3ExportAuthError,
     Is3ExportError,
@@ -51,6 +57,13 @@ WRITE_SETTLE = 2.5
 # Long enough for the unit to have acted and reported, short enough to correct
 # a stuck icon quickly.
 WRITE_VERIFY_DELAY = 1.5
+
+# A single analog input can push dozens of events a second as it jitters, and
+# writing a state for each floods the event loop -- enough to delay reading the
+# next line, which skews how long a button press looks.  So a sensor's listeners
+# are woken at most this often; its value is still stored on every event, only
+# the notification is coalesced.  Buttons and outputs are never throttled.
+NOTIFY_THROTTLE = 1.0
 
 
 @dataclass(slots=True)
@@ -103,6 +116,10 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         self._pending: dict[int, tuple[float, int]] = {}
         # address -> time its value last changed, from an event or a write.
         self._updated_at: dict[int, float] = {}
+        # Sensor addresses whose notifications are rate-limited (see below).
+        self._throttled: frozenset[int] = frozenset()
+        self._notified_at: dict[int, float] = {}
+        self._flush_scheduled: set[int] = set()
 
     @property
     def values(self) -> dict[int, int]:
@@ -231,14 +248,49 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
 
     @callback
     def _async_store(self, address: int, value: int) -> None:
-        """Store a value and wake only the entity that owns the address."""
+        """Store a value and wake the entity that owns the address.
+
+        A sensor's wake is rate-limited so a chatty analog input cannot flood the
+        loop; the value is stored regardless, so a later read is current.
+        """
         if self._values.get(address) == value:
             return
         self._values[address] = value
         self._updated_at[address] = self.hass.loop.time()
 
+        if address in self._throttled:
+            self._async_throttled_notify(address)
+        else:
+            self._async_notify(address)
+
+    @callback
+    def _async_notify(self, address: int) -> None:
+        """Wake every entity listening on an address, now."""
         for update in self._listeners.get(address, ()):
             update()
+
+    @callback
+    def _async_throttled_notify(self, address: int) -> None:
+        """Wake listeners at most once per NOTIFY_THROTTLE, keeping the latest."""
+        now = self.hass.loop.time()
+        since = now - self._notified_at.get(address, 0.0)
+        if since >= NOTIFY_THROTTLE:
+            self._notified_at[address] = now
+            self._async_notify(address)
+        elif address not in self._flush_scheduled:
+            # A change arrived too soon; wake once when the window is up, with
+            # whatever the value is by then.
+            self._flush_scheduled.add(address)
+            self.hass.loop.call_later(
+                NOTIFY_THROTTLE - since, self._async_flush, address
+            )
+
+    @callback
+    def _async_flush(self, address: int) -> None:
+        """The deferred wake for a throttled address."""
+        self._flush_scheduled.discard(address)
+        self._notified_at[address] = self.hass.loop.time()
+        self._async_notify(address)
 
     async def async_detect_capabilities(self) -> None:
         """Find out once whether this unit answers read commands."""
@@ -263,6 +315,14 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
     async def _async_update_data(self) -> Is3Data:
         """Re-read the export file and seed any address that has no value yet."""
         export = await self._async_read_export()
+
+        # Sensors change continuously and are the ones that flood; buttons and
+        # outputs are not throttled, so their events reach entities at once.
+        self._throttled = frozenset(
+            entry.address
+            for entry in export.entries
+            if platform_of(entry) == PLATFORM_SENSOR
+        )
 
         if not self.reads_supported:
             if not self._seeded:
