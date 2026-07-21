@@ -23,6 +23,7 @@ from custom_components.is3_export.export import (
     PLATFORM_SWITCH,
     Is3Entry,
     effective_unit,
+    enabled_by_default,
     module_of,
     parse_export,
     platform_of,
@@ -115,11 +116,22 @@ def test_humidity_sensor_gets_the_humidity_device_class(export) -> None:
 
 
 def test_unnamed_channels_are_disabled_by_default(export) -> None:
-    """Unlabelled channels are created but start disabled; named ones stay on."""
-    unnamed = Is3Sensor(_Coord(), export.by_address(0x01050016))
+    """An ordinary unlabelled channel starts disabled; a named one stays on."""
+    unnamed = export.by_address(0x01010070)  # unlabelled rocker input
+    assert not unnamed.labelled
+    assert enabled_by_default(unnamed) is False
     named = Is3Sensor(_Coord(), export.by_address(0x01050017))
-    assert unnamed.entity_registry_enabled_default is False
     assert named.entity_registry_enabled_default is True
+
+
+def test_ain_therm_is_shown_even_when_unnamed(export) -> None:
+    """AIN1-AIN2-Therm may be a real temperature depending on the unit's wiring,
+    so it is enabled on every switch, named or not."""
+    ain = export.by_address(0x01050016)  # unlabelled AIN1-AIN2-Therm
+    assert not ain.labelled
+    assert enabled_by_default(ain) is True
+    sensor = Is3Sensor(_Coord(), ain)
+    assert sensor.entity_registry_enabled_default is True
 
 
 def test_module_of_reads_the_model_and_serial(export) -> None:

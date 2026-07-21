@@ -936,6 +936,27 @@ def module_of(entry: Is3Entry) -> tuple[str, str] | None:
     return match["model"], match["serial"]
 
 
+# Roles always worth showing even when the installer left them unnamed, because
+# whether they carry a reading depends on iNELS configuration the export does not
+# reveal.  A wall switch's AIN1-AIN2 terminals are wired either as two digital
+# inputs or as one temperature input, reported here as AIN1-AIN2-Therm; only the
+# unit knows which, so the temperature is surfaced on every switch, named or not.
+_ALWAYS_SHOWN_ROLES = frozenset({"ain1-ain2-therm"})
+
+
+def enabled_by_default(entry: Is3Entry) -> bool:
+    """Whether the entity should start enabled rather than hidden.
+
+    Named entries are shown; the unnamed panel internals start disabled -- except
+    a few roles that may carry a real reading whatever their name, which are
+    always shown.
+    """
+    if entry.labelled:
+        return True
+    role = _role_from_hw_id(entry.hw_id) if entry.hw_id else None
+    return role is not None and role.lower() in _ALWAYS_SHOWN_ROLES
+
+
 def _parse_entry(line: str) -> Is3Entry | None:
     """Parse one entry line, or return None if it has no usable address."""
     tokens = line.split()

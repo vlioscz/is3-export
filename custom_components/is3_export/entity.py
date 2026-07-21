@@ -7,7 +7,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, MANUFACTURER, MODEL
 from .coordinator import Is3Coordinator
-from .export import Is3Entry, entity_icon, module_of
+from .export import Is3Entry, enabled_by_default, entity_icon, module_of
 
 
 class Is3Entity(CoordinatorEntity[Is3Coordinator]):
@@ -26,8 +26,9 @@ class Is3Entity(CoordinatorEntity[Is3Coordinator]):
         # A large site exports hundreds of panel internals the installer never
         # named -- button contacts, indicator LEDs, per-channel fault flags.
         # They are created so nothing is unreachable, but start disabled so the
-        # entity list stays close to what the installer actually labelled.
-        self._attr_entity_registry_enabled_default = entry.labelled
+        # entity list stays close to what the installer labelled -- bar a few
+        # roles that may carry a real reading whatever their name.
+        self._attr_entity_registry_enabled_default = enabled_by_default(entry)
 
         # An icon suggested by the name, so a fan or a mirror light reads as
         # itself. Platforms that set their own icon can still override this.
