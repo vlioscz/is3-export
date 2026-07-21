@@ -71,6 +71,18 @@ def test_auxiliary_stop_is_not_used(covers) -> None:
     assert covers["ZAL_kuchyn"].stop.address == 0x0203000C
 
 
+def test_auxiliary_bit_is_claimed_not_exposed(covers) -> None:
+    """The auxiliary interrupt is internal to the blind program, so it is
+    consumed rather than left to surface as its own switch."""
+    pokoj = covers["ZALUZIE_pokoj"]
+    assert pokoj.internal == (0x02030005,)
+    # Consumed means it counts among the cover's addresses, so the switch
+    # platform skips it, but it is not one of the driven controls.
+    assert 0x02030005 in pokoj.addresses
+    assert 0x02030005 not in {pokoj.open.address, pokoj.close.address, pokoj.stop.address}
+    assert covers["ZAL_kuchyn"].internal == (0x0203000E,)
+
+
 def test_unrelated_system_bits_are_not_blinds(export, covers) -> None:
     """Dimmer memory and blocking flags share the system bit range."""
     claimed = {a for c in covers.values() for a in c.addresses}

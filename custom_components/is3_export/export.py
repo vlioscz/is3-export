@@ -433,6 +433,10 @@ class Is3Cover:
     stop: Is3Entry | None = None
     tilt_open: Is3Entry | None = None
     tilt_close: Is3Entry | None = None
+    # Addresses the blind program owns but this integration does not drive --
+    # an auxiliary interrupt bit, say.  Consumed so they do not surface as their
+    # own switches, but never written.
+    internal: tuple[int, ...] = ()
 
     @property
     def unique_id(self) -> str:
@@ -441,9 +445,10 @@ class Is3Cover:
 
     @property
     def addresses(self) -> list[int]:
-        """Every address this cover consumes."""
+        """Every address this cover consumes, driven or internal."""
         parts = [self.open, self.close, self.stop, self.tilt_open, self.tilt_close]
-        return [part.address for part in parts if part is not None]
+        driven = [part.address for part in parts if part is not None]
+        return driven + list(self.internal)
 
     @property
     def has_tilt(self) -> bool:
@@ -483,6 +488,7 @@ def _classify_bit(function: str) -> str | None:
 def _covers_from_system_bits(export: Is3Export) -> list[Is3Cover]:
     """Assemble blinds from the installer's blind program bits."""
     groups: dict[str, dict[str, Is3Entry]] = {}
+    members: dict[str, list[Is3Entry]] = {}
 
     for entry in export.entries:
         if _class_of(entry) != (SPACE_SYSTEM, TYPE_SYSTEM_BIT):
@@ -491,6 +497,9 @@ def _covers_from_system_bits(export: Is3Export) -> list[Is3Cover]:
         if parsed is None:
             continue
         group, function = parsed
+        # Every bit of the group belongs to its blind program, even one this
+        # integration does not drive, so all are recorded to be claimed.
+        members.setdefault(group, []).append(entry)
         role = _classify_bit(function)
         if role is None:
             continue
@@ -501,6 +510,10 @@ def _covers_from_system_bits(export: Is3Export) -> list[Is3Cover]:
         # Without both directions it is not a blind we can drive.
         if OPEN not in roles or CLOSE not in roles:
             continue
+        driven = {role_entry.address for role_entry in roles.values()}
+        internal = tuple(
+            entry.address for entry in members[group] if entry.address not in driven
+        )
         covers.append(
             Is3Cover(
                 name=group,
@@ -510,6 +523,7 @@ def _covers_from_system_bits(export: Is3Export) -> list[Is3Cover]:
                 stop=roles.get(STOP),
                 tilt_open=roles.get(TILT_OPEN),
                 tilt_close=roles.get(TILT_CLOSE),
+                internal=internal,
             )
         )
     return covers
