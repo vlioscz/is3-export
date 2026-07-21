@@ -958,6 +958,12 @@ def is_wsb_button(entry: Is3Entry) -> bool:
     return _class_of(entry) in BINARY
 
 
+def is_battery_input(entry: Is3Entry) -> bool:
+    """Whether a digital input is a low-battery flag, such as an RF device's."""
+    role = _role_from_hw_id(entry.hw_id) if entry.hw_id else None
+    return role is not None and "battery" in role.lower()
+
+
 # Roles always worth showing even when the installer left them unnamed, because
 # whether they carry a reading depends on iNELS configuration the export does not
 # reveal.  A wall switch's AIN1-AIN2 terminals are wired either as two digital
@@ -965,16 +971,31 @@ def is_wsb_button(entry: Is3Entry) -> bool:
 # unit knows which, so the temperature is surfaced on every switch, named or not.
 _ALWAYS_SHOWN_ROLES = frozenset({"ain1-ain2-therm"})
 
+# A relay module's SW inputs mirror the local switch wired to each output; the
+# ALERT class is its per-output fault flags.  Both ride along on many modules,
+# are rarely wanted, and clutter the list, so they are hidden even when named.
+_SW_ROLE = re.compile(r"^SW\d+$", re.IGNORECASE)
+
+
+def _is_always_hidden(entry: Is3Entry) -> bool:
+    """Outputs hidden by default on every module, whatever their name."""
+    if _class_of(entry) in ALERT:
+        return True
+    role = _role_from_hw_id(entry.hw_id) if entry.hw_id else None
+    return role is not None and _SW_ROLE.match(role) is not None
+
 
 def enabled_by_default(entry: Is3Entry) -> bool:
     """Whether the entity should start enabled rather than hidden.
 
-    Named entries are shown; the unnamed panel internals start disabled -- with
-    two exceptions.  A wall switch is a deliberate control point with a handful
-    of meaningful channels, so all of them -- its buttons and indicator LEDs --
-    are shown whether named or not.  And a few roles may carry a real reading
-    whatever their name, so they are always shown too.
+    Named entries are shown and unnamed panel internals hidden, with exceptions
+    both ways.  Hidden even when named: a relay's SW state inputs and the fault
+    flags, which few installations watch.  Shown even when unnamed: every channel
+    of a wall switch, a deliberate control point, and a handful of roles that may
+    carry a real reading whatever their name.
     """
+    if _is_always_hidden(entry):
+        return False
     if entry.labelled:
         return True
     module = module_of(entry)

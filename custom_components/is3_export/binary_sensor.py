@@ -17,7 +17,13 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import Is3ConfigEntry, Is3Coordinator
 from .entity import Is3Entity
-from .export import ALERT, PLATFORM_BINARY_SENSOR, Is3Entry, platform_of
+from .export import (
+    ALERT,
+    PLATFORM_BINARY_SENSOR,
+    Is3Entry,
+    is_battery_input,
+    platform_of,
+)
 
 
 async def async_setup_entry(
@@ -38,9 +44,12 @@ class Is3BinarySensor(Is3Entity, BinarySensorEntity):
     """A digital input, or a fault flag raised by a module."""
 
     def __init__(self, coordinator: Is3Coordinator, entry: Is3Entry) -> None:
-        """Present module fault flags as diagnostic problem sensors."""
+        """Mark fault flags and low-battery inputs as diagnostic sensors."""
         super().__init__(coordinator, entry)
-        if (entry.space, entry.data_type) in ALERT:
+        if is_battery_input(entry):
+            self._attr_device_class = BinarySensorDeviceClass.BATTERY
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        elif (entry.space, entry.data_type) in ALERT:
             self._attr_device_class = BinarySensorDeviceClass.PROBLEM
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
 

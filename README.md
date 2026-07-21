@@ -210,12 +210,22 @@ relé desky nebo stmívače tak drží pohromadě — poznáš, který `Green1` 
 kterému vypínači. Systémové věci (bity, integery, tlačítka) modul nemají a
 zůstávají přímo na centrální jednotce.
 
-### Nepojmenované položky jsou vypnuté
+### Skryté ve výchozím stavu
 
 Velké instalace exportují stovky vnitřností panelů — kontakty tlačítek,
 indikační LEDky, poruchové příznaky. Entity z nich vzniknou, ale jsou
-**ve výchozím stavu vypnuté**. Zapneš je v nastavení integrace. Název dostanou
-z role v hardwarovém ID (např. `Up`, `Green`), ne z celého ID.
+**ve výchozím stavu vypnuté**. Zapneš je v nastavení integrace. Nepojmenované
+dostanou název z role v hardwarovém ID (např. `Up`, `Green`), ne z celého ID.
+
+Vypnuté jsou i **`SW` stavové vstupy** relé a **poruchové/alert příznaky**
+(`OUF-Alert`, typ `0x0107`) — a to **i když jsou pojmenované**, protože je
+sleduje málokdo. Alert má `device_class problem` a je diagnostický.
+
+### RF zařízení
+
+Zařízení na RF modulu (např. `RFKEY` — dálkové ovladače) se objeví jako vlastní
+zařízení s tlačítky (`binary_sensor`) a stav baterie `Battery_LOW` dostane
+`device_class battery`.
 
 ### Co je v exportu
 
