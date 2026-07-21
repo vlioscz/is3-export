@@ -575,11 +575,17 @@ def _covers_from_relay_pairs(export: Is3Export) -> list[Is3Cover]:
 # same channels into a climate zone; the roles below come from those pairings:
 #
 #   Actual-Therm-AOUT    current temperature (read, x100)
-#   Required-Therm-AOUT  the setpoint in force, from the active plan (read)
-#   Manual-Therm-AIN     the manual setpoint (write, x100; active in Manual)
+#   Required-Therm-AOUT  the heat setpoint in force, from the active plan (read)
+#   Manual-Therm-AIN     the manual heat setpoint (write, x100; active in Manual)
 #   Required-Heat-DOUT   1 while calling for heat
-#   Required-Cool-DOUT   1 while calling for cooling
-#   Control-Manual-IN    preset select: 0 Schedule, 1-4 presets, 5 Manual
+#   Control-Manual-IN    preset select: 0 Schedule, 1-4 presets, 7 Manual
+#   Control-HC-IN        heat/cool select: 0 heat, 1 cool (write; verified live)
+#
+# Cooling mirrors heating on its own channels, present on every controller:
+#
+#   Required-Cool-DOUT       1 while calling for cooling
+#   Required-Cool-Therm-AOUT the cool setpoint in force (read)
+#   Manual-Cool-Therm-AIN    the manual cool setpoint (write; active in Manual)
 #
 # The weekly plan behind Schedule (HEATCOOL_WEEK) is configured on the unit and
 # is not touched here.
@@ -602,13 +608,14 @@ CONTROLLER_PRESETS: dict[int, str] = {
 }
 PRESET_VALUES: dict[str, int] = {name: value for value, name in CONTROLLER_PRESETS.items()}
 
-# Control-Plan-IN values.  0 (normal) and 64 (0x40, vacation) are verified on a
-# live unit: both are writable and hold.  There is a third plan, public holiday
-# -- value 0x80 (128) in the MQTT integration -- but it could not be verified,
-# because it was not configured on the test unit and so could not be selected
-# even from the iNELS app.  It is left out until it can be confirmed on a unit
-# that has it set up; only the two verified plans are offered.
-PLAN_OPTIONS: dict[int, str] = {0: "Normal", 64: "Vacation"}
+# Control-Plan-IN values, all verified on a live unit that had the festive plan
+# configured: each is writable and holds.  0 normal (the weekly schedule), 64
+# (0x40) vacation, 128 (0x80) public holiday.  Selecting public holiday raised
+# the setpoint to its daily programme (HEATCOOL_DAY) and lit Public_holiday-AOUT;
+# vacation instead lit Holiday-DOUT.  The public-holiday plan must be set up in
+# the unit as a daily programme; where it is not, selecting it simply does not
+# take, the same as any unconfigured plan.
+PLAN_OPTIONS: dict[int, str] = {0: "Normal", 64: "Vacation", 128: "Public holiday"}
 PLAN_VALUES: dict[str, int] = {name: value for value, name in PLAN_OPTIONS.items()}
 
 _REQUIRED_ROLES = (
@@ -632,8 +639,11 @@ class Is3Controller:
     heat_demand: int
     preset_select: int
     control_on: int | None = None
+    control_hc: int | None = None
     plan_select: int | None = None
     cool_demand: int | None = None
+    cool_required: int | None = None
+    cool_manual: int | None = None
     status: int | None = None
 
     @property
@@ -652,8 +662,10 @@ class Is3Controller:
         ]
         for optional in (
             self.control_on,
+            self.control_hc,
             self.plan_select,
             self.cool_demand,
+            self.cool_required,
             self.status,
         ):
             if optional is not None:
@@ -690,8 +702,11 @@ def find_controllers(export: Is3Export) -> list[Is3Controller]:
                 heat_demand=channels["Required-Heat-DOUT"],
                 preset_select=channels["Control-Manual-IN"],
                 control_on=channels.get("Control-IN"),
+                control_hc=channels.get("Control-HC-IN"),
                 plan_select=channels.get("Control-Plan-IN"),
                 cool_demand=channels.get("Required-Cool-DOUT"),
+                cool_required=channels.get("Required-Cool-Therm-AOUT"),
+                cool_manual=channels.get("Manual-Cool-Therm-AIN"),
                 status=channels.get("Status-DOUT"),
             )
         )

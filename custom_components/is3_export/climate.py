@@ -5,12 +5,17 @@ Each heating controller becomes one climate zone.  The channels are grouped in
 Server's own zone pairings:
 
 * current temperature is ``Actual-Therm-AOUT``;
-* the setpoint in force is ``Required-Therm-AOUT``;
+* the setpoint in force is ``Required-Therm-AOUT`` (heat) or
+  ``Required-Cool-Therm-AOUT`` (cool);
 * the preset is ``Control-Manual-IN`` -- 0 Schedule, 1-4 Preset 1-4, 7 Manual;
 * the zone is turned off and on with ``Control-IN`` -- 0 off, 1 on;
-* setting a temperature switches to Manual and writes ``Manual-Therm-AIN``.
+* heating and cooling are chosen with ``Control-HC-IN`` -- 0 heat, 1 cool;
+* setting a temperature switches to Manual and writes ``Manual-Therm-AIN`` when
+  heating, or ``Manual-Cool-Therm-AIN`` when cooling.
 
-Temperatures are scaled by 100, as everywhere on iNELS.
+Both ``Control-HC-IN`` (the demand outputs flip with it) and the plans behind
+the plan select were confirmed on a live unit.  Temperatures are scaled by 100,
+as everywhere on iNELS.
 
 Setting the temperature has one subtlety, found the hard way.  Writing the
 setpoint immediately after switching to Manual corrupts it -- the value lands
@@ -99,13 +104,16 @@ class Is3Climate(CoordinatorEntity[Is3Coordinator], ClimateEntity):
         self._attr_unique_id = f"{config_entry_id}_{controller.unique_id}"
         self._attr_name = controller.name.replace("_", " ")
 
+        # Cooling is offered only where the zone exposes the heat/cool switch.
+        modes = [HVACMode.HEAT]
+        if controller.control_hc is not None:
+            modes.append(HVACMode.COOL)
         # A zone can be turned off only if it exposes the Control-IN switch.
         if controller.control_on is not None:
-            self._attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT]
+            modes.insert(0, HVACMode.OFF)
             self._attr_supported_features |= ClimateEntityFeature.TURN_OFF
             self._attr_supported_features |= ClimateEntityFeature.TURN_ON
-        else:
-            self._attr_hvac_modes = [HVACMode.HEAT]
+        self._attr_hvac_modes = modes
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, config_entry_id)},
@@ -140,7 +148,9 @@ class Is3Climate(CoordinatorEntity[Is3Coordinator], ClimateEntity):
 
     @property
     def target_temperature(self) -> float | None:
-        """The setpoint in force, whether from a plan, a preset or Manual."""
+        """The setpoint in force for the active mode: heat, or its own cool one."""
+        if self._is_cool and self.controller.cool_required is not None:
+            return self._temperature(self.controller.cool_required)
         return self._temperature(self.controller.required)
 
     @property
@@ -151,21 +161,32 @@ class Is3Climate(CoordinatorEntity[Is3Coordinator], ClimateEntity):
         return self.coordinator.values.get(self.controller.control_on) == 0
 
     @property
+    def _is_cool(self) -> bool:
+        """Whether the zone is switched to cooling via Control-HC-IN."""
+        if self.controller.control_hc is None:
+            return False
+        return self.coordinator.values.get(self.controller.control_hc) == 1
+
+    @property
     def hvac_mode(self) -> HVACMode:
-        """Off when the zone is switched off, otherwise heating."""
-        return HVACMode.OFF if self._is_off else HVACMode.HEAT
+        """Off when switched off, otherwise the selected heat or cool mode."""
+        if self._is_off:
+            return HVACMode.OFF
+        return HVACMode.COOL if self._is_cool else HVACMode.HEAT
 
     @property
     def hvac_action(self) -> HVACAction | None:
         """Whether the zone is heating, cooling, idle or off right now."""
         if self._is_off:
             return HVACAction.OFF
+        if self._is_cool:
+            if self.controller.cool_demand is not None and self.coordinator.values.get(
+                self.controller.cool_demand
+            ):
+                return HVACAction.COOLING
+            return HVACAction.IDLE
         if self.coordinator.values.get(self.controller.heat_demand):
             return HVACAction.HEATING
-        if self.controller.cool_demand is not None and self.coordinator.values.get(
-            self.controller.cool_demand
-        ):
-            return HVACAction.COOLING
         return HVACAction.IDLE
 
     @property
@@ -192,9 +213,23 @@ class Is3Climate(CoordinatorEntity[Is3Coordinator], ClimateEntity):
 
         raw = round(temperature * TEMP_SCALE)
         client = self.coordinator.client
+
+        # Cooling has its own manual setpoint and its own setpoint-in-force; when
+        # the zone is in cooling, write and verify those instead of the heat ones.
+        cooling = self._is_cool
+        manual_addr = (
+            self.controller.cool_manual
+            if cooling and self.controller.cool_manual is not None
+            else self.controller.manual
+        )
+        required_addr = (
+            self.controller.cool_required
+            if cooling and self.controller.cool_required is not None
+            else self.controller.required
+        )
         preset_hex = f"0x{self.controller.preset_select:08X}"
-        manual_hex = f"0x{self.controller.manual:08X}"
-        required_hex = f"0x{self.controller.required:08X}"
+        manual_hex = f"0x{manual_addr:08X}"
+        required_hex = f"0x{required_addr:08X}"
 
         try:
             if self.coordinator.values.get(self.controller.preset_select) != PRESET_MANUAL:
@@ -217,16 +252,24 @@ class Is3Climate(CoordinatorEntity[Is3Coordinator], ClimateEntity):
 
         # Only now that it is confirmed, reflect it.
         self.coordinator.async_note_write(self.controller.preset_select, PRESET_MANUAL)
-        self.coordinator.async_note_write(self.controller.required, raw)
+        self.coordinator.async_note_write(required_addr, raw)
         self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Turn the zone off or on. Any non-off mode turns it on."""
-        if self.controller.control_on is None:
+        """Turn the zone off, or switch it on into heating or cooling."""
+        if hvac_mode == HVACMode.OFF:
+            if self.controller.control_on is not None:
+                await self._async_write(self.controller.control_on, 0)
             return
-        await self._async_write(
-            self.controller.control_on, 0 if hvac_mode == HVACMode.OFF else 1
-        )
+
+        # Any heat/cool mode implies the zone is on; turn it on if it was off.
+        if self.controller.control_on is not None and self._is_off:
+            await self._async_write(self.controller.control_on, 1)
+        # Choose heating or cooling where the zone supports the switch.
+        if self.controller.control_hc is not None:
+            await self._async_write(
+                self.controller.control_hc, 1 if hvac_mode == HVACMode.COOL else 0
+            )
 
     async def _async_write(self, address: int, value: int) -> None:
         """Write one channel and reflect it at once."""

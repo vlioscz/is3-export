@@ -8,6 +8,8 @@ _ Controller_Manual-Therm-AIN_0E0001 0x01120043 0x00000000 °C
 _ Controller_Required-Therm-AOUT_0E0001 0x01080026 0x0000079E °C
 _ Controller_Required-Heat-DOUT_0E0001 0x01010063 0x00000001
 _ Controller_Required-Cool-DOUT_0E0001 0x01010064 0x00000000
+_ Controller_Required-Cool-Therm-AOUT_0E0001 0x01080027 0x000008CA °C
+_ Controller_Manual-Cool-Therm-AIN_0E0001 0x01120044 0x00000000 °C
 _ Controller_Mode-DOUT_0E0001 0x01010062 0x00000001
 _ Controller_Status-DOUT_0E0001 0x01010061 0x00000001
 _ Controller_Control-Type-AOUT_0E0001 0x0104000C 0x00000001

@@ -160,24 +160,30 @@ kořen `<název> Controller_<sériové>`. Z nich vznikne jedna entita `climate`:
 | | Kanál |
 | --- | --- |
 | aktuální teplota | `Actual-Therm-AOUT` |
-| požadovaná teplota | `Required-Therm-AOUT` |
+| požadovaná teplota | `Required-Therm-AOUT` (topení) / `Required-Cool-Therm-AOUT` (chlazení) |
 | topí / chladí | `Required-Heat-DOUT` / `Required-Cool-DOUT` |
 | předvolba | `Control-Manual-IN` — 0 Schedule, 1–4 Preset 1–4, **7 Manual** |
+| topení / chlazení | `Control-HC-IN` — 0 topení, 1 chlazení |
 | zapnuto / vypnuto | `Control-IN` — 0 vyp, 1 zap |
 
-Nastavení teploty přepne zónu do Manualu a zapíše `Manual-Therm-AIN`. Hodnoty
-předvoleb 1–4 i týdenní plán za Schedule (`HEATCOOL_WEEK`) se nastavují
-v jednotce.
+Přes `Control-HC-IN` se zóna přepíná mezi režimy **Heat** a **Cool** (kde je
+chladicí výstup zapojený). Chlazení má vlastní setpointy: `Required-Cool-Therm-AOUT`
+(v platnosti) a `Manual-Cool-Therm-AIN` (manuální).
+
+Nastavení teploty přepne zónu do Manualu a zapíše `Manual-Therm-AIN` (topení),
+resp. `Manual-Cool-Therm-AIN` (chlazení). Hodnoty předvoleb 1–4 i týdenní plán
+za Schedule (`HEATCOOL_WEEK`) se nastavují v jednotce.
 
 Pozor na jedno úskalí (ošetřené): zápis setpointu **hned** po přepnutí do
 Manualu ho zkorumpuje — hodnota spadne pod mrazovou ochranu (~0,1 °C) a s ní
 i topné relé, zóna přestane topit. Proto integrace po přepnutí **počká**, pak
-setpoint zapíše a **ověří zpětným čtením** `Required-Therm-AOUT`, případně zápis
-zopakuje. Manual je hodnota **7**, ne 5 — pětka shodí zónu na mrazovou ochranu.
+setpoint zapíše a **ověří zpětným čtením**, případně zápis zopakuje. Manual je
+hodnota **7**, ne 5 — pětka shodí zónu na mrazovou ochranu.
 
-Každá zóna má navíc `select` **plán** — Běžný / Prázdninový (`Control-Plan-IN`
-0 / 64, ověřeno). Třetí plán (sváteční, nejspíš 128) chybí — na testované
-jednotce nebyl nakonfigurovaný, takže ho nešlo ověřit; doplní se, až bude na čem.
+Každá zóna má navíc `select` **plán** — Běžný / Prázdninový / Sváteční
+(`Control-Plan-IN` 0 / 64 / 128, vše ověřeno na živé jednotce). Sváteční je
+**denní** program (`HEATCOOL_DAY`) a musí být v jednotce nakonfigurovaný; kde
+není, přepnutí se neuchytí a zpětné čtení plán v UI srovná zpět.
 
 ### Nepojmenované položky jsou vypnuté
 

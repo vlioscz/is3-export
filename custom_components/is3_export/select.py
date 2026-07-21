@@ -1,9 +1,10 @@
 """Select platform for the IS3 Export integration.
 
 One select per heating zone that has a Control-Plan-IN channel: it picks the
-plan the zone follows -- normal or vacation.  Both were verified writable on a
-live unit (0 and 64); a third plan, public holiday, exists but was not
-configured on the test unit and so could not be verified, and is left out.
+plan the zone follows -- normal, vacation or public holiday.  All three were
+verified writable on a live unit (0, 64, 128).  Public holiday must be set up in
+the unit as a daily programme; where a zone has no such programme, selecting it
+simply does not take -- the read-back then restores the shown plan.
 """
 
 from __future__ import annotations
@@ -72,14 +73,16 @@ class Is3PlanSelect(CoordinatorEntity[Is3Coordinator], SelectEntity):
         return PLAN_OPTIONS.get(self.coordinator.values.get(self._address))
 
     async def async_select_option(self, option: str) -> None:
-        """Switch to a plan."""
+        """Switch to a plan; the coordinator shows it and confirms it took.
+
+        A plan that is not configured on the zone will not hold, so the write is
+        read back and the shown plan corrected instead of left wrong.
+        """
         value = PLAN_VALUES[option]
-        address_hex = f"0x{self._address:08X}"
         try:
-            await self.coordinator.client.async_set(address_hex, value)
+            await self.coordinator.async_command(self._address, value)
         except Is3Error as err:
             raise HomeAssistantError(
-                f"Cannot write {value} to {address_hex}: {err}"
+                f"Cannot write {value} to 0x{self._address:08X}: {err}"
             ) from err
-        self.coordinator.async_note_write(self._address, value)
         self.async_write_ha_state()

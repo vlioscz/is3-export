@@ -33,7 +33,10 @@ def test_a_zone_is_assembled_from_its_channels(controllers) -> None:
     assert loz.heat_demand == 0x01010063
     assert loz.preset_select == 0x01110018
     assert loz.control_on == 0x01110015
+    assert loz.control_hc == 0x01110016
     assert loz.cool_demand == 0x01010064
+    assert loz.cool_required == 0x01080027
+    assert loz.cool_manual == 0x01120044
     assert loz.status == 0x01010061
 
 
@@ -49,15 +52,14 @@ def test_plan_channel_is_picked_up(controllers) -> None:
 
 
 def test_plan_values_are_the_verified_ones() -> None:
-    """Only the verified plans are offered: 0 normal, 64 vacation.
+    """All three plans are offered, each verified writable on a live unit.
 
-    Public holiday (0x80) is left out until it can be confirmed on a unit that
-    has it configured.
+    0 normal, 64 (0x40) vacation, 128 (0x80) public holiday -- the last was
+    confirmed once a unit had the festive daily programme configured.
     """
     from custom_components.is3_export.export import PLAN_OPTIONS
 
-    assert PLAN_OPTIONS == {0: "Normal", 64: "Vacation"}
-    assert 128 not in PLAN_OPTIONS
+    assert PLAN_OPTIONS == {0: "Normal", 64: "Vacation", 128: "Public holiday"}
 
 
 def test_name_comes_from_the_root(controllers) -> None:
@@ -65,9 +67,13 @@ def test_name_comes_from_the_root(controllers) -> None:
     assert controllers["TOP_loz"].name == "TOP_loz"
 
 
-def test_a_zone_without_cooling_has_no_cool_demand(controllers) -> None:
-    """The cooling channel is optional."""
-    assert controllers["TOP_ob"].cool_demand is None
+def test_a_zone_without_cooling_has_no_cool_channels(controllers) -> None:
+    """The cooling channels are optional; a heat-only zone has none of them."""
+    ob = controllers["TOP_ob"]
+    assert ob.cool_demand is None
+    assert ob.control_hc is None
+    assert ob.cool_required is None
+    assert ob.cool_manual is None
 
 
 def test_read_addresses_cover_every_polled_channel(controllers) -> None:
@@ -75,8 +81,13 @@ def test_read_addresses_cover_every_polled_channel(controllers) -> None:
     loz = controllers["TOP_loz"]
     for address in (loz.actual, loz.required, loz.heat_demand, loz.preset_select):
         assert address in loz.read_addresses
-    # The write-only manual setpoint is not read.
+    # The heat/cool switch and the cool setpoint are polled so the mode and the
+    # cooling target stay current.
+    assert loz.control_hc in loz.read_addresses
+    assert loz.cool_required in loz.read_addresses
+    # The write-only manual setpoints are not read.
     assert loz.manual not in loz.read_addresses
+    assert loz.cool_manual not in loz.read_addresses
 
 
 def test_incomplete_controllers_are_skipped() -> None:
