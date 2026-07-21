@@ -22,6 +22,7 @@ from .export import (
     PLATFORM_BINARY_SENSOR,
     Is3Entry,
     is_battery_input,
+    is_press_button,
     platform_of,
 )
 
@@ -31,12 +32,16 @@ async def async_setup_entry(
     entry: Is3ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Create a binary sensor for every digital input in the export file."""
+    """Create a binary sensor for every digital input in the export file.
+
+    Buttons are left out: momentary presses are reported by the event platform,
+    not as an on/off state that could stick on when a release is lost.
+    """
     coordinator = entry.runtime_data
     async_add_entities(
         Is3BinarySensor(coordinator, item)
         for item in coordinator.data.export.entries
-        if platform_of(item) == PLATFORM_BINARY_SENSOR
+        if platform_of(item) == PLATFORM_BINARY_SENSOR and not is_press_button(item)
     )
 
 

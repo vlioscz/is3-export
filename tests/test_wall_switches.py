@@ -18,12 +18,13 @@ from homeassistant.const import PERCENTAGE
 
 from custom_components.is3_export.const import DOMAIN
 from custom_components.is3_export.export import (
-    PLATFORM_BINARY_SENSOR,
+    PLATFORM_EVENT,
     PLATFORM_SENSOR,
     PLATFORM_SWITCH,
     Is3Entry,
     effective_unit,
     enabled_by_default,
+    is_press_button,
     module_of,
     parse_export,
     platform_of,
@@ -43,19 +44,27 @@ def export_fixture():
 
 
 def _platforms(export, serial: str) -> collections.Counter:
-    """The platform of every entity-producing channel on one wall switch."""
-    return collections.Counter(
-        platform_of(entry)
-        for entry in export.entries
-        if (entry.hw_id or "").endswith("_" + serial) and platform_of(entry) is not None
-    )
+    """The entity kind of every channel on one wall switch.
+
+    The button inputs are events, not binary sensors -- a momentary press, not a
+    stuck-able on/off state.
+    """
+    counts: collections.Counter = collections.Counter()
+    for entry in export.entries:
+        if not (entry.hw_id or "").endswith("_" + serial):
+            continue
+        if is_press_button(entry):
+            counts[PLATFORM_EVENT] += 1
+        elif (platform := platform_of(entry)) is not None:
+            counts[platform] += 1
+    return counts
 
 
 def test_wsb3_20_unpacks_into_eight_entities(export) -> None:
-    """Two rockers, two LEDs, two thermometers, two inputs."""
+    """Two rockers and two inputs (as events), two LEDs, two thermometers."""
     platforms = _platforms(export, WSB3_20)
     assert sum(platforms.values()) == 8
-    assert platforms[PLATFORM_BINARY_SENSOR] == 4
+    assert platforms[PLATFORM_EVENT] == 4
     assert platforms[PLATFORM_SWITCH] == 2
     assert platforms[PLATFORM_SENSOR] == 2
 
@@ -64,7 +73,7 @@ def test_wsb3_40_unpacks_into_twelve_entities(export) -> None:
     """The four-rocker switch has four inputs and four LEDs more than the two."""
     platforms = _platforms(export, WSB3_40)
     assert sum(platforms.values()) == 12
-    assert platforms[PLATFORM_BINARY_SENSOR] == 6
+    assert platforms[PLATFORM_EVENT] == 6
     assert platforms[PLATFORM_SWITCH] == 4
     assert platforms[PLATFORM_SENSOR] == 2
 
@@ -75,7 +84,7 @@ def test_wsb3_hum_adds_humidity_and_dew_point(export) -> None:
     assert sum(platforms.values()) == 10
     # Two thermometers, plus humidity and dew point, are all sensors.
     assert platforms[PLATFORM_SENSOR] == 4
-    assert platforms[PLATFORM_BINARY_SENSOR] == 4
+    assert platforms[PLATFORM_EVENT] == 4
     assert platforms[PLATFORM_SWITCH] == 2
 
 

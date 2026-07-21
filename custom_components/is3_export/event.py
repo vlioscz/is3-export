@@ -30,6 +30,10 @@ LONG_PRESS = "long_press"
 # Held this long or more is a long press, matching the iNELS threshold.
 LONG_PRESS_SECONDS = 2.0
 
+# If no release arrives within this long, the off event was lost -- an RF fob's
+# especially -- so the input is forced back off, longer than any real hold.
+MAX_HOLD_SECONDS = 10.0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -46,25 +50,26 @@ async def async_setup_entry(
 
 
 class Is3ButtonEvent(Is3Entity, EventEntity):
-    """The press of a wall switch button, reported as short or long.
+    """The press of a wall switch or RF remote button, short or long.
 
-    A long press fires the moment the hold crosses the threshold -- as iNELS
-    does, while the button is still down -- not on release.  A release before
-    then is a short press.
+    A button is momentary, so it is an event rather than a binary sensor: no
+    on/off state to be left stuck when a release is lost.  A long press fires
+    the moment the hold crosses the threshold -- as iNELS does, while the button
+    is still down -- and a release before then is a short press.
     """
 
     _attr_device_class = EventDeviceClass.BUTTON
     _attr_event_types = [SHORT_PRESS, LONG_PRESS]
 
     def __init__(self, coordinator: Is3Coordinator, entry: Is3Entry) -> None:
-        """Sit alongside the button's binary sensor, on the same switch."""
+        """Bind to the button's input on its own switch."""
         super().__init__(coordinator, entry)
         self._address = entry.address
         self._attr_unique_id = f"{self._attr_unique_id}_event"
         self._attr_name = f"{entry.name.replace('_', ' ')} press"
         self._pressed = False
         self._long_fired = False
-        self._cancel_timer = None
+        self._timers: list = []
 
     async def async_added_to_hass(self) -> None:
         """Watch the input for its own press logic, not the base state rewrite."""
@@ -76,33 +81,42 @@ class Is3ButtonEvent(Is3Entity, EventEntity):
                 self._address, self._handle_change
             )
         )
-        self.async_on_remove(self._stop_timer)
+        self.async_on_remove(self._stop_timers)
 
     @callback
     def _handle_change(self) -> None:
         """React to the input going on or off."""
         pressed = bool(self.coordinator.values.get(self._address))
         if pressed and not self._pressed:
-            # Button went down: start the long-press clock.
+            # Button went down: start the long-press clock, and a longer safety
+            # timer in case the release event never arrives.
             self._pressed = True
             self._long_fired = False
-            self._stop_timer()
-            self._cancel_timer = async_call_later(
-                self.hass, LONG_PRESS_SECONDS, self._on_long_threshold
-            )
+            self._stop_timers()
+            self._timers = [
+                async_call_later(self.hass, LONG_PRESS_SECONDS, self._on_long_threshold),
+                async_call_later(self.hass, MAX_HOLD_SECONDS, self._on_max_hold),
+            ]
         elif not pressed and self._pressed:
             # Button released: a short press, unless the long one already fired.
             self._pressed = False
-            self._stop_timer()
+            self._stop_timers()
             if not self._long_fired:
                 self._fire(SHORT_PRESS)
 
     @callback
     def _on_long_threshold(self, _now) -> None:
         """The hold outlasted the threshold while the button was still down."""
-        self._cancel_timer = None
         self._long_fired = True
         self._fire(LONG_PRESS)
+        # The safety timer is left running: a release may still be lost.
+
+    @callback
+    def _on_max_hold(self, _now) -> None:
+        """No release in a plausible time: the off event was lost."""
+        # Clearing the input reports it off, which our own listener then handles
+        # as the missing release, so the next press is seen again.
+        self.coordinator.async_reset(self._address)
 
     @callback
     def _fire(self, event_type: str) -> None:
@@ -111,8 +125,8 @@ class Is3ButtonEvent(Is3Entity, EventEntity):
         self.async_write_ha_state()
 
     @callback
-    def _stop_timer(self) -> None:
-        """Cancel a pending long-press timer, if any."""
-        if self._cancel_timer is not None:
-            self._cancel_timer()
-            self._cancel_timer = None
+    def _stop_timers(self) -> None:
+        """Cancel any pending timers."""
+        for cancel in self._timers:
+            cancel()
+        self._timers = []

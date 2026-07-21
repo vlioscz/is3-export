@@ -196,15 +196,17 @@ vyplyne to z typu adresy:
 | **WSB3-40** | 12 — 4 tlačítka + 4 LED + 2 teploty + 2 dig. vstupy |
 | **WSB3-*-Hum** | +2 — vlhkost (`%`, `device_class humidity`) a rosný bod (°C) |
 
-Každé tlačítko (Up/Down/DIN) má navíc **`event` entitu** s typy `short_press` a
-`long_press`. Dlouhý stisk (držení **≥ 2 s**) se do exportu nedá zapsat, ale
-pozná se z délky sepnutí vstupu a vystřelí ve chvíli překročení prahu, jako
-v iNELS — dá se na něj navázat automatizace. (Vyžaduje zapnuté události
-`Digital_IN_SwitchOn` i `SwitchOff` v IDM3.)
+Tlačítka (Up/Down/DIN) jsou **`event` entita**, ne binary_sensor — jsou
+**momentální**, takže je zbytečné (a problematické) držet u nich stav On/Off,
+který se zasekne, když se ztratí událost o rozepnutí. Event má typy
+`short_press` a `long_press`. Dlouhý stisk (držení **≥ 2 s**) se do exportu
+nedá zapsat, ale pozná se z délky sepnutí a vystřelí ve chvíli překročení prahu,
+jako v iNELS. (Vyžaduje zapnuté události `Digital_IN_SwitchOn` i `SwitchOff`
+v IDM3. Kdyby se rozepnutí přesto ztratilo, vstup se po ~10 s sám srovná.)
 
 Totéž platí pro tlačítka **RF ovladačů** (`RFKEY`) — ověřeno i na klíčence:
 přijímač hlásí sepnutí i rozepnutí (ťuknutí ~0,1 s, dlouhý stisk sekundy). Stav
-baterie ovladače entitu `event` nedostane.
+baterie ovladače je běžný `binary_sensor` (battery), ne tlačítko.
 
 ### Rozdělení na zařízení
 

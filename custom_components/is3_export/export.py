@@ -757,11 +757,13 @@ def expected_entities(export: Is3Export, entry_id: str) -> set[tuple[str, str]]:
     for entry in export.entries:
         if entry.address in claimed:
             continue
+        if is_press_button(entry):
+            # A button is an event, not the binary sensor its input would be.
+            expected.add((PLATFORM_EVENT, f"{entry_id}_{entry.unique_id}_event"))
+            continue
         platform = platform_of(entry)
         if platform is not None:
             expected.add((platform, f"{entry_id}_{entry.unique_id}"))
-        if is_press_button(entry):
-            expected.add((PLATFORM_EVENT, f"{entry_id}_{entry.unique_id}_event"))
     return expected
 
 

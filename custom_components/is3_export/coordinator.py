@@ -173,6 +173,18 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         self._pending[address] = (self.hass.loop.time(), value)
         self._async_store(address, value)
 
+    @callback
+    def async_reset(self, address: int) -> None:
+        """Force a momentary input back to zero.
+
+        A button's release event can be lost -- an RF fob's especially -- which
+        would leave the input stuck on, since values are only stored on change.
+        The button's event entity calls this after a plausible hold with no
+        release, so the input clears and the next press is seen again.
+        """
+        self._pending.pop(address, None)
+        self._async_store(address, 0)
+
     async def async_command(self, address: int, value: int) -> None:
         """Write a value, show it at once, and confirm the output followed.
 
