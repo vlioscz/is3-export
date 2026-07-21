@@ -921,19 +921,24 @@ _HW_MODULE = re.compile(r"^(?P<model>[^_]+)_.+_(?P<serial>[0-9A-Fa-f]{6})$")
 def module_of(entry: Is3Entry) -> tuple[str, str] | None:
     """The physical module an entry lives on: ``(model, serial)``, or None.
 
-    A hardware id reads ``<model>_<role>_<serial>``, so entries sharing a serial
+    A hardware id reads ``<module>_<role>_<serial>``, so entries sharing a serial
     are channels of one physical module -- a wall switch, a relay board, a
-    dimmer -- and belong together under one device.  Controller channels are
-    excluded: they make up a heating zone the climate entity already stands for.
-    System-level entries (system bits and integers) have no module.
+    dimmer -- and belong together under one device.  Two kinds stay on the
+    central unit itself: controller channels, which make up a heating zone the
+    climate entity already stands for, and the unit's own ``In-Out`` terminals,
+    of which there are few and often none in use.  System-level entries (system
+    bits and integers) have no module.
     """
     hw_id = entry.hw_id
     if not hw_id:
         return None
     match = _HW_MODULE.match(hw_id)
-    if match is None or match["model"] == "Controller":
+    if match is None:
         return None
-    return match["model"], match["serial"]
+    model = match["model"]
+    if model == "Controller" or model.startswith("In-Out"):
+        return None
+    return model, match["serial"]
 
 
 # Roles always worth showing even when the installer left them unnamed, because

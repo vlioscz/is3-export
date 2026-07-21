@@ -140,15 +140,20 @@ def test_module_of_reads_the_model_and_serial(export) -> None:
     assert module_of(up) == ("WSB3-20-Hum", WSB3_20_HUM)
 
 
-def test_module_of_skips_system_and_controller_entries() -> None:
-    """System bits have no module, and controller channels belong to a zone."""
+def test_module_of_skips_system_controller_and_unit_io() -> None:
+    """These stay on the central unit rather than getting their own device."""
+    # System bits have no hardware id at all.
     assert module_of(Is3Entry(name="grp", address=0x02030000)) is None
+    # Controller channels belong to a heating zone.
     controller = Is3Entry(
-        name="_",
-        address=0x01080025,
-        hw_id="Controller_Actual-Therm-AOUT_0E0001",
+        name="_", address=0x01080025, hw_id="Controller_Actual-Therm-AOUT_0E0001"
     )
     assert module_of(controller) is None
+    # The unit's own In-Out terminals belong to the unit itself.
+    unit_io = Is3Entry(
+        name="Int_osv", address=0x01050030, hw_id="In-Out-CU3-01M-CU3-02M_AIN1_0F0001"
+    )
+    assert module_of(unit_io) is None
 
 
 def test_each_switch_is_its_own_device_under_the_unit(export) -> None:
