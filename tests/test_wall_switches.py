@@ -16,11 +16,14 @@ import pytest
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import PERCENTAGE
 
+from custom_components.is3_export.const import DOMAIN
 from custom_components.is3_export.export import (
     PLATFORM_BINARY_SENSOR,
     PLATFORM_SENSOR,
     PLATFORM_SWITCH,
+    Is3Entry,
     effective_unit,
+    module_of,
     parse_export,
     platform_of,
 )
@@ -117,3 +120,33 @@ def test_unnamed_channels_are_disabled_by_default(export) -> None:
     named = Is3Sensor(_Coord(), export.by_address(0x01050017))
     assert unnamed.entity_registry_enabled_default is False
     assert named.entity_registry_enabled_default is True
+
+
+def test_module_of_reads_the_model_and_serial(export) -> None:
+    """A channel's hardware id gives the module it belongs to."""
+    up = export.by_address(0x01010070)  # WSB3-20-Hum Up
+    assert module_of(up) == ("WSB3-20-Hum", WSB3_20_HUM)
+
+
+def test_module_of_skips_system_and_controller_entries() -> None:
+    """System bits have no module, and controller channels belong to a zone."""
+    assert module_of(Is3Entry(name="grp", address=0x02030000)) is None
+    controller = Is3Entry(
+        name="_",
+        address=0x01080025,
+        hw_id="Controller_Actual-Therm-AOUT_0E0001",
+    )
+    assert module_of(controller) is None
+
+
+def test_each_switch_is_its_own_device_under_the_unit(export) -> None:
+    """Channels group by module: same switch shares a device, different ones do not."""
+    hall_temp = Is3Sensor(_Coord(), export.by_address(0x01050001))  # WSB3-20
+    hall_ext = Is3Sensor(_Coord(), export.by_address(0x01050002))  # same switch
+    bath_hum = Is3Sensor(_Coord(), export.by_address(0x01050017))  # WSB3-20-Hum
+
+    assert hall_temp.device_info["identifiers"] == hall_ext.device_info["identifiers"]
+    assert hall_temp.device_info["identifiers"] != bath_hum.device_info["identifiers"]
+    # The module hangs off the central unit (the config entry's own device).
+    assert hall_temp.device_info["identifiers"] == {(DOMAIN, f"wall_{WSB3_20}")}
+    assert hall_temp.device_info["via_device"] == (DOMAIN, "wall")

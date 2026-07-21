@@ -196,6 +196,14 @@ vyplyne to z typu adresy:
 | **WSB3-40** | 12 — 4 tlačítka + 4 LED + 2 teploty + 2 dig. vstupy |
 | **WSB3-*-Hum** | +2 — vlhkost (`%`, `device_class humidity`) a rosný bod (°C) |
 
+### Rozdělení na zařízení
+
+Každý **fyzický modul** (podle sériového čísla v hardwarovém ID) je v HA
+**vlastní zařízení** vnořené pod centrální jednotku. Kanály jednoho vypínače,
+relé desky nebo stmívače tak drží pohromadě — poznáš, který `Green1` patří ke
+kterému vypínači. Systémové věci (bity, integery, tlačítka) modul nemají a
+zůstávají přímo na centrální jednotce.
+
 ### Nepojmenované položky jsou vypnuté
 
 Velké instalace exportují stovky vnitřností panelů — kontakty tlačítek,

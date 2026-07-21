@@ -7,7 +7,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, MANUFACTURER, MODEL
 from .coordinator import Is3Coordinator
-from .export import Is3Entry, entity_icon
+from .export import Is3Entry, entity_icon, module_of
 
 
 class Is3Entity(CoordinatorEntity[Is3Coordinator]):
@@ -34,12 +34,27 @@ class Is3Entity(CoordinatorEntity[Is3Coordinator]):
         if (icon := entity_icon(entry)) is not None:
             self._attr_icon = icon
 
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, config_entry_id)},
-            manufacturer=MANUFACTURER,
-            model=MODEL,
-            name=coordinator.config_entry.title,
-        )
+        # Channels of one physical module -- a wall switch's buttons and LEDs, a
+        # relay board's outputs -- are grouped under that module's own device, so
+        # a "Green1" is clearly one switch's and not adrift among every module's.
+        # The module sits under the central unit; entries with no module (system
+        # bits and integers) stay on the unit itself.
+        if (module := module_of(entry)) is not None:
+            model, serial = module
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, f"{config_entry_id}_{serial}")},
+                manufacturer=MANUFACTURER,
+                model=model,
+                name=f"{model} {serial}",
+                via_device=(DOMAIN, config_entry_id),
+            )
+        else:
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, config_entry_id)},
+                manufacturer=MANUFACTURER,
+                model=MODEL,
+                name=coordinator.config_entry.title,
+            )
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to pushed changes of this entity's own address."""

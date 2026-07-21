@@ -915,6 +915,27 @@ def _role_from_hw_id(hw_id: str) -> str | None:
     return role if separator and role else None
 
 
+_HW_MODULE = re.compile(r"^(?P<model>[^_]+)_.+_(?P<serial>[0-9A-Fa-f]{6})$")
+
+
+def module_of(entry: Is3Entry) -> tuple[str, str] | None:
+    """The physical module an entry lives on: ``(model, serial)``, or None.
+
+    A hardware id reads ``<model>_<role>_<serial>``, so entries sharing a serial
+    are channels of one physical module -- a wall switch, a relay board, a
+    dimmer -- and belong together under one device.  Controller channels are
+    excluded: they make up a heating zone the climate entity already stands for.
+    System-level entries (system bits and integers) have no module.
+    """
+    hw_id = entry.hw_id
+    if not hw_id:
+        return None
+    match = _HW_MODULE.match(hw_id)
+    if match is None or match["model"] == "Controller":
+        return None
+    return match["model"], match["serial"]
+
+
 def _parse_entry(line: str) -> Is3Entry | None:
     """Parse one entry line, or return None if it has no usable address."""
     tokens = line.split()

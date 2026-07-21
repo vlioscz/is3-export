@@ -11,7 +11,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .api import Is3Client, Is3ConnectionError
 from .export import Is3Export, expected_entities
@@ -23,6 +23,9 @@ from .const import (
     DEFAULT_HTTP_PORT,
     DEFAULT_PORT,
     DELIMITER_SPACE,
+    DOMAIN,
+    MANUFACTURER,
+    MODEL,
 )
 from .coordinator import Is3ConfigEntry, Is3Coordinator
 
@@ -84,10 +87,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: Is3ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator
+    _register_unit_device(hass, entry)
     _prune_orphan_entities(hass, entry, coordinator.data.export)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
+
+
+def _register_unit_device(hass: HomeAssistant, entry: Is3ConfigEntry) -> None:
+    """Register the central unit as a device.
+
+    Module devices -- wall switches, relay boards -- point at it as their parent,
+    so it is created up front rather than left to whichever entity happens to be
+    the first to mention it.
+    """
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        manufacturer=MANUFACTURER,
+        model=MODEL,
+        name=entry.title,
+    )
 
 
 def _prune_orphan_entities(
