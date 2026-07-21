@@ -24,9 +24,11 @@ report is direction: the relays hold their value while the motor runs, and the
 program bits are pulses that the unit clears when the blind arrives.
 
 A live test on a program-bit blind confirmed the model: driving up or down
-holds that direction until the blind ends or the stop bit is pulsed, the stop
-clears the direction so the blind can be driven again, and a tilt is a brief
-pulse the program clears itself.
+holds that direction until the program's configured run time elapses (about a
+minute for a normal window) or the stop bit is pulsed, either of which clears
+the direction so the blind can be driven again, and a tilt is a brief pulse the
+program clears itself.  So even a blind with no end sensor stops on its own; the
+integration does not need to know or track the run time.
 """
 
 from __future__ import annotations
