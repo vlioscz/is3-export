@@ -115,13 +115,26 @@ def test_humidity_sensor_gets_the_humidity_device_class(export) -> None:
     assert sensor.native_unit_of_measurement == PERCENTAGE
 
 
-def test_unnamed_channels_are_disabled_by_default(export) -> None:
-    """An ordinary unlabelled channel starts disabled; a named one stays on."""
-    unnamed = export.by_address(0x01010070)  # unlabelled rocker input
-    assert not unnamed.labelled
-    assert enabled_by_default(unnamed) is False
-    named = Is3Sensor(_Coord(), export.by_address(0x01050017))
-    assert named.entity_registry_enabled_default is True
+def test_unnamed_channel_off_a_wall_switch_stays_disabled() -> None:
+    """An ordinary unlabelled channel on another module still starts disabled."""
+    relay = Is3Entry(
+        name="_", address=0x01020099, hw_id="SA3-06M_RE1_0C0009", labelled=False
+    )
+    assert enabled_by_default(relay) is False
+
+
+def test_every_wall_switch_channel_is_shown(export) -> None:
+    """A wall switch's channels are all shown, named or not -- Green/Red LEDs and
+    the rocker inputs included, since a switch has few, all-meaningful channels."""
+    for address in (0x0102006A, 0x0102006B, 0x01010070):  # unlabelled Green, Red, Up
+        entry = export.by_address(address)
+        assert not entry.labelled
+        assert enabled_by_default(entry) is True
+    # An unnamed LED reaches the entity already enabled.
+    from custom_components.is3_export.switch import Is3Switch
+
+    green = Is3Switch(_Coord(), export.by_address(0x0102006A))
+    assert green.entity_registry_enabled_default is True
 
 
 def test_ain_therm_is_shown_even_when_unnamed(export) -> None:

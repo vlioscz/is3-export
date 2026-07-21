@@ -952,11 +952,16 @@ _ALWAYS_SHOWN_ROLES = frozenset({"ain1-ain2-therm"})
 def enabled_by_default(entry: Is3Entry) -> bool:
     """Whether the entity should start enabled rather than hidden.
 
-    Named entries are shown; the unnamed panel internals start disabled -- except
-    a few roles that may carry a real reading whatever their name, which are
-    always shown.
+    Named entries are shown; the unnamed panel internals start disabled -- with
+    two exceptions.  A wall switch is a deliberate control point with a handful
+    of meaningful channels, so all of them -- its buttons and indicator LEDs --
+    are shown whether named or not.  And a few roles may carry a real reading
+    whatever their name, so they are always shown too.
     """
     if entry.labelled:
+        return True
+    module = module_of(entry)
+    if module is not None and module[0].startswith("WSB"):
         return True
     role = _role_from_hw_id(entry.hw_id) if entry.hw_id else None
     return role is not None and role.lower() in _ALWAYS_SHOWN_ROLES
