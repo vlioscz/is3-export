@@ -22,6 +22,11 @@ export contains no blind program.
 Neither reports a position, so the covers carry an assumed state.  What they do
 report is direction: the relays hold their value while the motor runs, and the
 program bits are pulses that the unit clears when the blind arrives.
+
+A live test on a program-bit blind confirmed the model: driving up or down
+holds that direction until the blind ends or the stop bit is pulsed, the stop
+clears the direction so the blind can be driven again, and a tilt is a brief
+pulse the program clears itself.
 """
 
 from __future__ import annotations
