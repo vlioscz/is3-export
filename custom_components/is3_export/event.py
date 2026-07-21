@@ -1,16 +1,16 @@
 """Event platform for the IS3 Export integration.
 
 A wall switch button, and an RF remote's, carries a second function on a long
-press -- held two seconds or more -- that iNELS acts on but cannot put in the
-export, since it is not a physical channel.  The unit does report the input
-going on and off, though, so the length of the press can be measured here: a
-press that outlasts the threshold is fired as a long press the moment it
-crosses it, the way iNELS reacts, and a shorter one as a short press when the
-button is let go.
+press that iNELS acts on but cannot put in the export, since it is not a
+physical channel.  The unit does report the input going on and off, though, so
+the press is timed here and classified when the button is let go: short if it
+was held briefly, long past the threshold.
 
-Both were confirmed on a live unit: a wall switch, and an RF fob whose receiver
-reports the button on and off the same way -- a tap read under a tenth of a
-second, a hold several seconds.
+The unit reports a release with a variable delay -- around two seconds even on a
+quick tap, seen live -- so classifying on release and timing the two events
+apart is steadier than firing at a fixed moment during the hold, and the
+threshold is set above that delay.  A release that never arrives (an RF fob's
+can be lost) reports nothing rather than guessing.
 """
 
 from __future__ import annotations
@@ -78,10 +78,8 @@ class Is3ButtonEvent(Is3Entity, EventEntity):
         self._cancel = None
 
     async def async_added_to_hass(self) -> None:
-        """Watch the input for its own press logic, not the base state rewrite."""
-        # Skip Is3Entity's listener -- it only rewrites state -- and use one that
-        # measures how long the button is held.
-        await super(Is3Entity, self).async_added_to_hass()
+        """Watch the input to measure how long the button is held."""
+        await super().async_added_to_hass()
         self.async_on_remove(
             self.coordinator.async_add_address_listener(
                 self._address, self._handle_change
