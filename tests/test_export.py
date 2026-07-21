@@ -70,11 +70,16 @@ def test_named_entry_with_hw_id(is3) -> None:
     assert entry.unit is None
 
 
-def test_unlabelled_entry_falls_back_to_hw_id(is3) -> None:
-    """Entries labelled `_` are named after their hardware id instead."""
+def test_unlabelled_entry_falls_back_to_its_role(is3) -> None:
+    """Entries labelled `_` are named after the role in their hardware id.
+
+    ``Controller_Actual-Therm-AIN_0D0005`` reads as ``Actual-Therm-AIN``, not
+    the whole id, so an unnamed wall-switch input shows a usable name.
+    """
     entry = is3.by_address(0x01120005)
     assert entry is not None
-    assert entry.name == "Controller_Actual-Therm-AIN_0D0005"
+    assert entry.name == "Actual-Therm-AIN"
+    assert not entry.labelled
     assert entry.unit == "°C"
     assert entry.value == 0xD8
 

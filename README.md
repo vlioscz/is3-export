@@ -185,11 +185,23 @@ Každá zóna má navíc `select` **plán** — Běžný / Prázdninový / Svát
 **denní** program (`HEATCOOL_DAY`) a musí být v jednotce nakonfigurovaný; kde
 není, přepnutí se neuchytí a zpětné čtení plán v UI srovná zpět.
 
+### Nástěnné vypínače (WSB3)
+
+Jeden vypínač se rozpadne na entitu za každý kanál — nic se nespeciálně-neřeší,
+vyplyne to z typu adresy:
+
+| Typ | Rozpad na entity |
+| --- | --- |
+| **WSB3-20** | 8 — 2 tlačítka (nahoru/dolů) + 2 LED (zelená/červená) + 2 teploty + 2 dig. vstupy |
+| **WSB3-40** | 12 — 4 tlačítka + 4 LED + 2 teploty + 2 dig. vstupy |
+| **WSB3-*-Hum** | +2 — vlhkost (`%`, `device_class humidity`) a rosný bod (°C) |
+
 ### Nepojmenované položky jsou vypnuté
 
 Velké instalace exportují stovky vnitřností panelů — kontakty tlačítek,
 indikační LEDky, poruchové příznaky. Entity z nich vzniknou, ale jsou
-**ve výchozím stavu vypnuté**. Zapneš je v nastavení integrace.
+**ve výchozím stavu vypnuté**. Zapneš je v nastavení integrace. Název dostanou
+z role v hardwarovém ID (např. `Up`, `Green`), ne z celého ID.
 
 ### Co je v exportu
 

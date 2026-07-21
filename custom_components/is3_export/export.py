@@ -886,6 +886,21 @@ def _parse_header(line: str) -> Is3Header:
     )
 
 
+_HW_SERIAL = re.compile(r"_[0-9A-Fa-f]{6}$")
+
+
+def _role_from_hw_id(hw_id: str) -> str | None:
+    """The role in a hardware id: ``WSB3-20-Hum_Up_0B0003`` -> ``Up``.
+
+    Hardware ids read ``<module>_<role>_<serial>``: the serial is a trailing
+    six-hex suffix and the module the leading segment, so the role is what sits
+    between them.  Returns None when there is nothing between them to name.
+    """
+    trimmed = _HW_SERIAL.sub("", hw_id)
+    _module, separator, role = trimmed.partition("_")
+    return role if separator and role else None
+
+
 def _parse_entry(line: str) -> Is3Entry | None:
     """Parse one entry line, or return None if it has no usable address."""
     tokens = line.split()
@@ -902,8 +917,10 @@ def _parse_entry(line: str) -> Is3Entry | None:
     hw_id = labels[1] if len(labels) > 1 else None
     labelled = name != NO_LABEL
     if not labelled and hw_id:
-        # Unlabelled entries are still identifiable by their hardware id.
-        name = hw_id
+        # Unlabelled entries fall back to the hardware id's role -- a wall
+        # switch input reads "Up", not "WSB3-20-Hum_Up_0B0003" -- or to the
+        # whole id when it carries no role.
+        name = _role_from_hw_id(hw_id) or hw_id
 
     try:
         address = int(tokens[address_at], 16)
