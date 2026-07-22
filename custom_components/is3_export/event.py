@@ -11,11 +11,16 @@ hold plus a random delay as large as the hold itself, so a tap and a long press
 give the same reading. This was checked exhaustively; duration is simply not
 carried on the wire.
 
-So a press is reported the moment the input goes on, and everything that follows
--- the unit's re-broadcasts of the on state, and the late or missing release --
-is swallowed for a short refractory window as one physical interaction. At the
-end of the window the input is forced back off locally, so a lost release can
-never wedge the value on and make the next press's on-event look like no change.
+So a press is reported the moment the input goes on, the unit's immediate
+re-send of the on state is swallowed for a short window so one press is one
+event, and the input is then forced back off locally -- so a delayed or lost
+release cannot leave the value on and make the next press look like no change,
+which was making taps go missing. Quick taps therefore each register.
+
+The window is kept short deliberately, so it does not swallow genuine quick
+taps. The trade-off is that physically holding a button, which the unit
+re-broadcasts every second or two, fires a press for each re-broadcast -- fine
+for the taps these buttons are used for.
 """
 
 from __future__ import annotations
@@ -31,10 +36,13 @@ from .export import Is3Entry, is_press_button
 
 PRESS = "press"
 
-# After a press, the re-broadcasts of the on state and the late/lost release are
-# all one interaction, folded into a single press.  Sized to cover the observed
-# re-broadcast train (routine ones up to ~2.5s) and the ~2s-delayed release.
-REFRACTORY_SECONDS = 3.0
+# A short window after a press, just long enough to swallow the unit's immediate
+# re-send of the on state (a "double tap" of the same press, seen ~0.1s later)
+# so one physical press is one event.  Kept short on purpose: a longer window
+# would also swallow genuine quick taps.  At its end the input is forced back
+# off, so a delayed or lost release cannot leave the value on and make the next
+# press look like no change -- which was making taps go missing.
+REFRACTORY_SECONDS = 0.5
 
 
 async def async_setup_entry(
@@ -62,7 +70,7 @@ class Is3ButtonEvent(Is3Entity, EventEntity):
         super().__init__(coordinator, entry)
         self._address = entry.address
         self._attr_unique_id = f"{self._attr_unique_id}_event"
-        self._attr_name = f"{entry.name.replace('_', ' ')} press"
+        self._attr_name = entry.name.replace("_", " ")
         self._active = False
         self._cancel = None
 

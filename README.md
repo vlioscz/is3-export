@@ -216,10 +216,13 @@ Naměřená doba = skutečné držení + náhodné zpoždění stejně velké ja
 takže ťuknutí a dlouhý stisk dají tutéž hodnotu. Nejde to spolehlivě — ověřeno
 vyčerpávajícím rozborem.
 
-Proto se `press` vystřelí hned na **náběžné hraně** sepnutí a všechno další
-(přeposílání sepnutí, pozdní/ztracené rozepnutí) se na krátké okno **spolkne
-jako jedna interakce**; na konci okna se vstup lokálně srovná na 0, takže
-ztracené rozepnutí nikdy nezasekne hodnotu a nespolkne další stisk.
+Proto se `press` vystřelí hned na **náběžné hraně** sepnutí, okamžité
+dvojposlání jednotky se na **krátké okno (~0,5 s)** spolkne (jeden stisk = jedna
+událost) a vstup se pak lokálně srovná na 0 — takže pozdní ani ztracené
+rozepnutí nezasekne hodnotu a **každé ťuknutí spolehlivě projde**. Okno je
+schválně krátké, aby nespolklo rychlé ťukání. Kompromis: **držení** tlačítka
+(které jednotka přeposílá) vystřelí `press` opakovaně — pro ťukání, na které
+jsou tato tlačítka, to nevadí.
 
 Stav baterie RF ovladače je běžný `binary_sensor` (battery), ne tlačítko.
 
