@@ -208,6 +208,9 @@ vyplyne to z typu adresy:
 | **WSB3-40** | 12 — 4 tlačítka + 4 LED + 2 teploty + 2 dig. vstupy |
 | **WSB3-*-Hum** | +2 — vlhkost (`%`, `device_class humidity`) a rosný bod (°C) |
 
+Indikační **LED** (role `Green`/`Red`) jsou spínače s ikonou **G**/**R** —
+pozná se to z role, takže i nepojmenované (`_`) je dostanou.
+
 Tlačítka (Up/Down/DIN) jsou **`event` entita**. Drátové vypínače (WSB) rozlišují
 **krátký `press` a `long_press`**; tlačítka **RF ovladače** hlásí jen `press`.
 

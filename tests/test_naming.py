@@ -12,6 +12,8 @@ from custom_components.is3_export.export import (
     ICON_LAMP,
     ICON_FAN,
     ICON_LED,
+    ICON_LED_GREEN,
+    ICON_LED_RED,
     ICON_MIRROR,
     ICON_SOCKET,
     PLATFORM_BINARY_SENSOR,
@@ -129,6 +131,27 @@ def test_sockets_get_a_socket_icon(name: str) -> None:
 def test_socket_token_is_whole_word_only(name: str = "Zastineni_obyvak") -> None:
     """`zas` is a whole token, so `zastineni` (shading) gets no socket icon."""
     assert entity_icon(_entry(name)) is None
+
+
+@pytest.mark.parametrize(
+    ("hw_id", "icon"),
+    [
+        ("WSB3-20_Green_0B0001", ICON_LED_GREEN),
+        ("WSB3-40_Green2_0B0002", ICON_LED_GREEN),
+        ("WSB3-20-Hum_Red_0B0003", ICON_LED_RED),
+        ("WSB3-40_Red1_0B0002", ICON_LED_RED),
+    ],
+)
+def test_switch_leds_get_a_colour_letter_icon(hw_id: str, icon: str) -> None:
+    """A switch's indicator LED reads its colour off the role, even unnamed."""
+    entry = _entry("_", hw_id=hw_id)
+    assert platform_of(entry) == PLATFORM_SWITCH
+    assert entity_icon(entry) == icon
+
+
+def test_led_icon_needs_the_whole_colour_role() -> None:
+    """A role that merely starts with `red`/`green` is not an indicator LED."""
+    assert entity_icon(_entry("Redukce", hw_id="SA3-04M_Redukce_0A0001")) is None
 
 
 @pytest.mark.parametrize("name", ["LED_kuchyn", "LEDpas_ob", "Sv_LED_linka", "led_schody"])

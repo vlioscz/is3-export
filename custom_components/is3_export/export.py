@@ -317,6 +317,11 @@ ICON_MIRROR = "mdi:mirror"
 ICON_LED = "mdi:led-strip-variant"
 ICON_FAN = "mdi:fan"
 ICON_SOCKET = "mdi:power-socket-de"
+# A wall switch's two indicator LEDs, told apart by their hw_id role
+# (`Green`/`Red`, optionally numbered), so unnamed ones get the letter too.
+ICON_LED_GREEN = "mdi:alpha-g-circle"
+ICON_LED_RED = "mdi:alpha-r-circle"
+_LED_ROLE = re.compile(r"^(?P<colour>green|red)\d*$", re.IGNORECASE)
 
 PLATFORM_BUTTON = "button"
 PLATFORM_LIGHT = "light"
@@ -390,6 +395,10 @@ def entity_icon(entry: Is3Entry) -> str | None:
             return ICON_FAN
         if SOCKET_TOKEN in tokens:
             return ICON_SOCKET
+        role = _role_from_hw_id(entry.hw_id) if entry.hw_id else None
+        if role and (match := _LED_ROLE.match(role)):
+            green = match["colour"].lower() == "green"
+            return ICON_LED_GREEN if green else ICON_LED_RED
     return None
 
 
