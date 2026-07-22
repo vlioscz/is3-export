@@ -211,9 +211,10 @@ Tlačítka (Up/Down/DIN) jsou **`event` entita**. Drátové vypínače (WSB) roz
 sepnutím (`=1`) a rozepnutím (`=0`). Na drátovém vypínači je tahle mezera čistá a
 konzistentní — ťuknutí padnou pod ~100 ms, záměrná držení nad ~1,5 s, s širokou
 prázdnou mezerou mezi tím. Integrace proto na sepnutí spustí časovač: přijde-li
-dřív rozepnutí, je to krátký `press`; když časovač (0,6 s) doběhne a tlačítko je
-pořád držené, je to `long_press` (vystřelí hned v tom okamžiku). Ztracené
-rozepnutí tlačítko nezasekne — pojistný časovač po chvíli držení uvolní.
+dřív rozepnutí, je to krátký `press`; když časovač (**1,5 s**, stejně jako
+long-press v iNELS) doběhne a tlačítko je **pořád držené**, je to `long_press` —
+vystřelí **hned v tom okamžiku, nečeká na puštění**, takže akce na dlouhý stisk
+naskočí včas. Ztracené rozepnutí tlačítko nezasekne — pojistný časovač uvolní.
 
 > ⚠️ **Podmínka spolehlivého short/long: neběžící Connection Server.** Jeho
 > periodický sběr jednotku na pár sekund zmrazí a dobu držení rozmaže (viz sekci

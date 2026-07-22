@@ -34,10 +34,11 @@ from .export import Is3Entry, is_press_button, is_rf_button
 PRESS = "press"
 LONG_PRESS = "long_press"
 
-# How long a wired button must be held before the press counts as long.  Well
-# above real taps (~0.1 s) and well below deliberate holds (~1.5-2 s), so the two
-# never cross.  A long press fires the moment this elapses, while still held.
-LONG_PRESS_SECONDS = 0.6
+# How long a wired button must be held before the press counts as long -- 1.5s,
+# matching iNELS's own long-press threshold.  Well above real taps (~0.1 s).  The
+# long press fires the moment this elapses, while the button is still held (it
+# does not wait for the release), so a held-button action triggers on time.
+LONG_PRESS_SECONDS = 1.5
 
 # A held button whose release was lost would otherwise stay "pressed" for good;
 # after this long with no release, give up waiting so the next press registers.
