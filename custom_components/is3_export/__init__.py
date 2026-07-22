@@ -45,6 +45,13 @@ PLATFORMS: list[Platform] = [
 
 async def async_setup_entry(hass: HomeAssistant, entry: Is3ConfigEntry) -> bool:
     """Set up IS3 Export from a config entry."""
+    # DIAG (temporary): with the reader now yielding, a residual ~0.8s loop block
+    # still delays some presses.  Loop debug makes asyncio log
+    # "Executing <Handle ...> took N seconds" and name the exact slow callback.
+    # To be reverted with the other diagnostics.
+    hass.loop.set_debug(True)
+    hass.loop.slow_callback_duration = 0.3
+
     coordinator: Is3Coordinator | None = None
 
     def handle_event(address: int, value: int) -> None:
