@@ -30,7 +30,6 @@ from .export import (
     Is3Export,
     is_press_button,
     is_readable,
-    is_writable,
     platform_of,
 )
 from .source import (
@@ -332,18 +331,21 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
                 self._seeded = True
             return Is3Data(export=export, values=dict(self._values))
 
-        # Anything that has never reported, plus every output. Outputs are
-        # re-read because a stale switch is visible and confusing, and events
-        # for them are not guaranteed to arrive promptly. Sensors are left to
-        # the event stream, which covers them continuously.
-        stale = [
+        # Read everything readable once, at startup, to establish a baseline.
+        # After that the event stream keeps values current, so only addresses
+        # that have *still* never reported are re-read.  Re-reading every output
+        # on every cycle -- which this used to do -- put a burst of GETs on the
+        # one shared connection every scan, and the unit answered them ahead of
+        # pushing its own events, so a button press could land seconds late,
+        # queued behind the replies.  Listening beats polling: the unit pushes
+        # an event for an output when it changes, the same as for a wall switch.
+        unread = [
             e.address_hex
             for e in export.entries
-            if is_readable(e)
-            and (e.address not in self._values or is_writable(e))
+            if is_readable(e) and e.address not in self._values
         ]
-        if stale:
-            await self._async_seed(stale[:INITIAL_READ_LIMIT])
+        if unread:
+            await self._async_seed(unread[:INITIAL_READ_LIMIT])
             self._seeded = True
 
         return Is3Data(export=export, values=dict(self._values))
