@@ -242,6 +242,24 @@ class Is3Client:
         loop = asyncio.get_running_loop()
         worst_await = 0.0  # DIAG: largest wait for a line seen this session
 
+        # DIAG (temporary): a heartbeat every 0.25s. If the event loop is blocked
+        # -- so scheduled callbacks (an automation firing, the UI update) run late
+        # -- this fires late by the amount of the block, which is exactly the
+        # button lag when the reader itself is caught up.
+        def _heartbeat(expected: float) -> None:
+            if reader is not self._reader:
+                return  # connection replaced; stop this monitor
+            lag = loop.time() - expected
+            if lag > 0.5:
+                _LOGGER.warning(
+                    "is3-diag LOOP BLOCKED %.2fs -- scheduled callbacks delayed "
+                    "this long (this is the button lag)",
+                    lag,
+                )
+            loop.call_later(0.25, _heartbeat, loop.time() + 0.25)
+
+        loop.call_later(0.25, _heartbeat, loop.time() + 0.25)
+
         while True:
             waited_from = loop.time()
             try:
