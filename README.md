@@ -196,21 +196,24 @@ vyplyne to z typu adresy:
 | **WSB3-40** | 12 — 4 tlačítka + 4 LED + 2 teploty + 2 dig. vstupy |
 | **WSB3-*-Hum** | +2 — vlhkost (`%`, `device_class humidity`) a rosný bod (°C) |
 
-Tlačítka (Up/Down/DIN) jsou **`event` entita**, ne binary_sensor — jsou
-**momentální**, takže je zbytečné (a problematické) držet u nich stav On/Off,
-který se zasekne, když se ztratí událost o rozepnutí. Event má typy
-`short_press` a `long_press`.
+Tlačítka (Up/Down/DIN) jsou **`event` entita** s jediným typem **`press`** — ne
+binary_sensor (ten se zasekne, když se ztratí rozepnutí) a **ne rozlišování
+short/long**.
 
-Krátký/dlouhý stisk se pozná z **délky držení**, vyhodnotí se **při puštění**.
-Práh pro dlouhý stisk je **≥ 3 s** — výš než v iNELS schválně: jednotka hlásí
-rozepnutí s **proměnlivým zpožděním** (viděné ~2 s i u rychlého ťuknutí), takže
-nižší práh by krátké ťuknutí spletl s dlouhým. Vyžaduje zapnuté události
-`Digital_IN_SwitchOn` i `SwitchOff` v IDM3. Ztracené rozepnutí (u RF) nevystřelí
-nic (krátký a dlouhý už nejdou rozlišit) a vstup se po ~10 s sám srovná.
+**Proč jen `press`:** rozlišit krátký a dlouhý stisk vyžaduje změřit dobu
+držení = dobu mezi sepnutím a rozepnutím. Jenže jednotka hlásí rozepnutí
+s **proměnlivým zpožděním** (0 až ~2 s i u rychlého ťuknutí), posílá ho pozdě
+nebo — u RF — vůbec, a **žádný vlastní long-press signál na ASCII portu není**.
+Naměřená doba = skutečné držení + náhodné zpoždění stejně velké jako to držení,
+takže ťuknutí a dlouhý stisk dají tutéž hodnotu. Nejde to spolehlivě — ověřeno
+vyčerpávajícím rozborem.
 
-Totéž platí pro tlačítka **RF ovladačů** (`RFKEY`) — ověřeno i na klíčence:
-přijímač hlásí sepnutí i rozepnutí (ťuknutí ~0,1 s, dlouhý stisk sekundy). Stav
-baterie ovladače je běžný `binary_sensor` (battery), ne tlačítko.
+Proto se `press` vystřelí hned na **náběžné hraně** sepnutí a všechno další
+(přeposílání sepnutí, pozdní/ztracené rozepnutí) se na krátké okno **spolkne
+jako jedna interakce**; na konci okna se vstup lokálně srovná na 0, takže
+ztracené rozepnutí nikdy nezasekne hodnotu a nespolkne další stisk.
+
+Stav baterie RF ovladače je běžný `binary_sensor` (battery), ne tlačítko.
 
 ### Rozdělení na zařízení
 

@@ -1,16 +1,21 @@
 """Event platform for the IS3 Export integration.
 
-A wall switch button, and an RF remote's, carries a second function on a long
-press that iNELS acts on but cannot put in the export, since it is not a
-physical channel.  The unit does report the input going on and off, though, so
-the press is timed here and classified when the button is let go: short if it
-was held briefly, long past the threshold.
+A wall switch button, and an RF remote's, reports one reliable ``press`` event.
 
-The unit reports a release with a variable delay -- around two seconds even on a
-quick tap, seen live -- so classifying on release and timing the two events
-apart is steadier than firing at a fixed moment during the hold, and the
-threshold is set above that delay.  A release that never arrives (an RF fob's
-can be lost) reports nothing rather than guessing.
+It cannot report short vs long. Telling them apart needs the length of the hold,
+which is the time between the unit's press and release events -- and the unit
+sends those with a variable delay of up to a couple of seconds, sends the
+release late or (over RF) not at all, and offers no signal that separates "held
+two seconds" from "release delayed two seconds". The measured gap is the true
+hold plus a random delay as large as the hold itself, so a tap and a long press
+give the same reading. This was checked exhaustively; duration is simply not
+carried on the wire.
+
+So a press is reported the moment the input goes on, and everything that follows
+-- the unit's re-broadcasts of the on state, and the late or missing release --
+is swallowed for a short refractory window as one physical interaction. At the
+end of the window the input is forced back off locally, so a lost release can
+never wedge the value on and make the next press's on-event look like no change.
 """
 
 from __future__ import annotations
@@ -24,17 +29,12 @@ from .coordinator import Is3ConfigEntry, Is3Coordinator
 from .entity import Is3Entity
 from .export import Is3Entry, is_press_button
 
-SHORT_PRESS = "short_press"
-LONG_PRESS = "long_press"
+PRESS = "press"
 
-# Held this long or more is a long press.  Above iNELS's own threshold on
-# purpose: the unit reports a release with a variable delay -- around two seconds
-# was seen on a quick tap -- so a lower bar would read those taps as long.
-LONG_PRESS_SECONDS = 3.0
-
-# If no release arrives within this long, the off event was lost -- an RF fob's
-# especially -- so the input is forced back off, longer than any real hold.
-MAX_HOLD_SECONDS = 10.0
+# After a press, the re-broadcasts of the on state and the late/lost release are
+# all one interaction, folded into a single press.  Sized to cover the observed
+# re-broadcast train (routine ones up to ~2.5s) and the ~2s-delayed release.
+REFRACTORY_SECONDS = 3.0
 
 
 async def async_setup_entry(
@@ -52,20 +52,10 @@ async def async_setup_entry(
 
 
 class Is3ButtonEvent(Is3Entity, EventEntity):
-    """The press of a wall switch or RF remote button, short or long.
-
-    A button is momentary, so it is an event rather than a binary sensor: no
-    on/off state to be left stuck when a release is lost.  The press is
-    classified when the button is released, by how long it was held: the unit's
-    release event can arrive well after the press, so waiting for it and timing
-    the two apart is steadier than firing at a fixed moment during the hold.
-
-    A release that never arrives -- lost, as an RF fob's can be -- reports
-    nothing rather than guessing, since short and long cannot be told apart then.
-    """
+    """A wall switch or RF remote button, reported as a single reliable press."""
 
     _attr_device_class = EventDeviceClass.BUTTON
-    _attr_event_types = [SHORT_PRESS, LONG_PRESS]
+    _attr_event_types = [PRESS]
 
     def __init__(self, coordinator: Is3Coordinator, entry: Is3Entry) -> None:
         """Bind to the button's input on its own switch."""
@@ -73,12 +63,11 @@ class Is3ButtonEvent(Is3Entity, EventEntity):
         self._address = entry.address
         self._attr_unique_id = f"{self._attr_unique_id}_event"
         self._attr_name = f"{entry.name.replace('_', ' ')} press"
-        self._pressed = False
-        self._press_time = 0.0
+        self._active = False
         self._cancel = None
 
     async def async_added_to_hass(self) -> None:
-        """Watch the input to measure how long the button is held."""
+        """Watch the input to fire one press per interaction."""
         await super().async_added_to_hass()
         self.async_on_remove(
             self.coordinator.async_add_address_listener(
@@ -89,30 +78,26 @@ class Is3ButtonEvent(Is3Entity, EventEntity):
 
     @callback
     def _handle_change(self) -> None:
-        """React to the input going on or off."""
-        pressed = bool(self.coordinator.values.get(self._address))
-        if pressed and not self._pressed:
-            # Button went down: note when, and arm the lost-release safety net.
-            self._pressed = True
-            self._press_time = self.hass.loop.time()
-            self._stop()
-            self._cancel = async_call_later(
-                self.hass, MAX_HOLD_SECONDS, self._on_timeout
-            )
-        elif not pressed and self._pressed:
-            # Button released: short or long by how long it was held.
-            self._pressed = False
-            self._stop()
-            held = self.hass.loop.time() - self._press_time
-            self._fire(LONG_PRESS if held >= LONG_PRESS_SECONDS else SHORT_PRESS)
+        """Fire once on the leading edge; swallow the rest of the interaction."""
+        if not self.coordinator.values.get(self._address):
+            # A release, or the end-of-interaction reset: never fires.
+            return
+        if self._active:
+            # A re-broadcast of the on state while still held: swallow it.
+            return
+        self._active = True
+        self._fire(PRESS)
+        self._cancel = async_call_later(
+            self.hass, REFRACTORY_SECONDS, self._end_interaction
+        )
 
     @callback
-    def _on_timeout(self, _now) -> None:
-        """No release in a plausible time: the off event was lost."""
-        # Clear the input without reporting a press -- short and long cannot be
-        # told apart now -- so it is not stuck on and the next press is seen.
+    def _end_interaction(self, _now) -> None:
+        """Close the window and force the input off, so the next press is fresh."""
         self._cancel = None
-        self._pressed = False
+        self._active = False
+        # Clear the stored value: a lost release could leave it on, and then the
+        # next press's on-event would be deduped as no change and never seen.
         self.coordinator.async_reset(self._address)
 
     @callback
@@ -123,7 +108,7 @@ class Is3ButtonEvent(Is3Entity, EventEntity):
 
     @callback
     def _stop(self) -> None:
-        """Cancel the pending safety timer, if any."""
+        """Cancel the pending refractory timer, if any."""
         if self._cancel is not None:
             self._cancel()
             self._cancel = None

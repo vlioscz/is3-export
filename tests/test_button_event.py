@@ -1,8 +1,10 @@
-"""A wall switch button's short and long press.
+"""A wall switch / RF button fires one reliable press per interaction.
 
-The unit reports the input going on and off, so the length of a press is
-measured: a hold that outlasts the threshold fires a long press while the
-button is still down, a shorter one a short press on release.
+Short vs long cannot be told apart over this stream -- the unit's release event
+is delayed by up to seconds, or lost -- so a single press is fired on the
+leading edge, and the re-broadcasts and the late/lost release are swallowed for
+a refractory window as one interaction, which then clears the input so a lost
+release cannot wedge it on and swallow the next press.
 """
 
 from __future__ import annotations
@@ -12,11 +14,7 @@ from pathlib import Path
 import pytest
 
 import custom_components.is3_export.event as event_module
-from custom_components.is3_export.event import (
-    LONG_PRESS,
-    SHORT_PRESS,
-    Is3ButtonEvent,
-)
+from custom_components.is3_export.event import PRESS, Is3ButtonEvent
 from custom_components.is3_export.export import (
     expected_entities,
     is_press_button,
@@ -55,23 +53,11 @@ class _Coord:
 
     def async_reset(self, address: int) -> None:
         self.reset_calls.append(address)
+        self.values[address] = 0
 
 
-class _Clock:
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def time(self) -> float:
-        return self.now
-
-
-class _Hass:
-    def __init__(self, clock: _Clock) -> None:
-        self.loop = clock
-
-
-def _button(monkeypatch) -> tuple[Is3ButtonEvent, _Clock, list]:
-    """A button event on a fake clock, wired to a timer that fires when told."""
+def _button(monkeypatch) -> tuple[Is3ButtonEvent, list]:
+    """A button event wired to a fake refractory timer that fires when told."""
     timers: list[dict] = []
 
     def fake_call_later(hass, delay, action):
@@ -85,70 +71,66 @@ def _button(monkeypatch) -> tuple[Is3ButtonEvent, _Clock, list]:
 
     monkeypatch.setattr(event_module, "async_call_later", fake_call_later)
 
-    clock = _Clock()
     entity = Is3ButtonEvent.__new__(Is3ButtonEvent)
     entity.coordinator = _Coord()
-    entity.hass = _Hass(clock)
+    entity.hass = object()
     entity._address = UP
-    entity._pressed = False
-    entity._press_time = 0.0
+    entity._active = False
     entity._cancel = None
     entity.fired = []
     entity._trigger_event = entity.fired.append
     entity.async_write_ha_state = lambda: None
-    return entity, clock, timers
+    return entity, timers
 
 
-def test_a_quick_release_is_a_short_press(monkeypatch) -> None:
-    entity, clock, timers = _button(monkeypatch)
+def test_a_press_fires_once_on_the_leading_edge(monkeypatch) -> None:
+    entity, timers = _button(monkeypatch)
     entity.coordinator.values[UP] = 1
-    entity._handle_change()  # pressed
-    clock.now += 0.1  # released a moment later
+    entity._handle_change()  # the 0 -> 1 edge
+    assert entity.fired == [PRESS]
+    assert entity._active
+    assert len(timers) == 1, "the refractory window is armed"
+
+
+def test_rebroadcasts_and_the_release_are_swallowed(monkeypatch) -> None:
+    """The on state re-broadcast while held, and the release, add nothing."""
+    entity, timers = _button(monkeypatch)
+    entity.coordinator.values[UP] = 1
+    entity._handle_change()  # press
+    entity._handle_change()  # a re-broadcast "=1" while still held
     entity.coordinator.values[UP] = 0
-    entity._handle_change()
-    assert entity.fired == [SHORT_PRESS]
-    assert timers[0]["cancelled"], "the safety timer is cancelled on release"
+    entity._handle_change()  # the release
+    assert entity.fired == [PRESS]
 
 
-def test_holding_past_the_threshold_is_a_long_press(monkeypatch) -> None:
-    entity, clock, timers = _button(monkeypatch)
+def test_the_window_end_clears_the_input(monkeypatch) -> None:
+    """When the refractory ends, the input is forced off so the next press is fresh."""
+    entity, timers = _button(monkeypatch)
     entity.coordinator.values[UP] = 1
-    entity._handle_change()  # pressed
-    clock.now += event_module.LONG_PRESS_SECONDS + 0.5  # held past the threshold
-    entity.coordinator.values[UP] = 0
-    entity._handle_change()
-    assert entity.fired == [LONG_PRESS]
-
-
-def test_a_release_reported_late_still_reads_short(monkeypatch) -> None:
-    """The unit can report a release seconds late; a quick tap held well under
-    the threshold must still read short, not long."""
-    entity, clock, timers = _button(monkeypatch)
-    entity.coordinator.values[UP] = 1
-    entity._handle_change()
-    clock.now += 2.1  # the off event arrived late, but under the threshold
-    entity.coordinator.values[UP] = 0
-    entity._handle_change()
-    assert entity.fired == [SHORT_PRESS]
-
-
-def test_a_repeated_press_signal_does_not_restart_the_clock(monkeypatch) -> None:
-    """The unit re-sends the on state mid-hold; it must not reset the press time."""
-    entity, clock, timers = _button(monkeypatch)
-    entity.coordinator.values[UP] = 1
-    entity._handle_change()
-    started = entity._press_time
-    clock.now += 1.0
-    entity._handle_change()  # a duplicate "on" arrives
-    assert entity._press_time == started
-
-
-def test_a_lost_release_reports_nothing_and_clears(monkeypatch) -> None:
-    """With no release in a plausible time -- the off event was lost -- the input
-    is cleared without a press event: short and long cannot be told apart now."""
-    entity, clock, timers = _button(monkeypatch)
-    entity.coordinator.values[UP] = 1
-    entity._handle_change()  # pressed, no release follows
-    timers[0]["action"](None)  # the safety timer fires
+    entity._handle_change()  # press
+    timers[0]["action"](None)  # the window ends
+    assert entity._active is False
     assert entity.coordinator.reset_calls == [UP]
-    assert entity.fired == []
+
+
+def test_the_next_press_fires_after_the_window(monkeypatch) -> None:
+    entity, timers = _button(monkeypatch)
+    entity.coordinator.values[UP] = 1
+    entity._handle_change()  # press 1
+    timers[0]["action"](None)  # window ends -> value reset to 0
+    entity.coordinator.values[UP] = 1
+    entity._handle_change()  # press 2 on a fresh edge
+    assert entity.fired == [PRESS, PRESS]
+
+
+def test_a_lost_release_does_not_wedge_the_button(monkeypatch) -> None:
+    """No release arrives; the window still clears the stuck value, so the next
+    press is seen -- the "first press nothing, second press wrong" cure."""
+    entity, timers = _button(monkeypatch)
+    entity.coordinator.values[UP] = 1
+    entity._handle_change()  # press 1 (its release will be lost)
+    timers[0]["action"](None)  # window ends -> async_reset forces the value off
+    assert entity.coordinator.values[UP] == 0
+    entity.coordinator.values[UP] = 1
+    entity._handle_change()  # press 2 detected despite the lost release
+    assert entity.fired == [PRESS, PRESS]
