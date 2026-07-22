@@ -239,8 +239,11 @@ class Is3Client:
         """Consume the stream, routing replies and events."""
         reader = self._reader
         assert reader is not None
+        loop = asyncio.get_running_loop()
+        worst_await = 0.0  # DIAG: largest wait for a line seen this session
 
         while True:
+            waited_from = loop.time()
             try:
                 raw = await reader.readuntil(_EOL)
             except asyncio.IncompleteReadError:
@@ -250,7 +253,29 @@ class Is3Client:
                 _LOGGER.debug("Read error from %s: %s", self._host, err)
                 break
 
-            self._handle_line(raw.decode(_ENCODING, errors="replace").strip())
+            # DIAG (temporary): when a digital-input event lands, report whether
+            # the reader was behind -- bytes already queued behind this line mean
+            # the button waited in the buffer, not on the wire.
+            waited = loop.time() - waited_from
+            worst_await = max(worst_await, waited)
+            line = raw.decode(_ENCODING, errors="replace").strip()
+            if "0101" in line:
+                parsed = parse_line(line, self._delimiter)
+                if parsed and parsed[0] == "EVENT" and (parsed[1] >> 16) & 0xFF == 0x01:
+                    backlog = len(getattr(reader, "_buffer", b""))
+                    _LOGGER.warning(
+                        "is3-diag button %s=%s | this line waited %.2fs | bytes "
+                        "queued behind it now: %dB (~%d lines) | worst wait so "
+                        "far %.2fs",
+                        hex(parsed[1]),
+                        parsed[2],
+                        waited,
+                        backlog,
+                        backlog // 22,
+                        worst_await,
+                    )
+
+            self._handle_line(line)
 
         # The stream ended. Unless we are shutting down, the connection dropped
         # under us -- a unit reboot or a network blip -- and we would otherwise
