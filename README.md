@@ -288,6 +288,29 @@ zařízení a od internetu.
 - **Binární formáty `.otc` / `.cld` se nečtou.** Obsahují navíc pojmenované scény.
 - **HTTP i ASCII port jdou bez šifrování.**
 
+## ⚠️ Connection Server zpomaluje odezvu
+
+Pokud tutéž centrální jednotku obsluhuje i **iNELS Connection Server**, počítej
+s občasnou prodlevou. Connection Server si zhruba **každých 40–60 s** sáhne na
+jednotku pro kompletní stav a jednotka při tom na **~2–4 s zamrzne celý ASCII
+výstup** — přestane posílat události i vykonávat příkazy. Do tohoto okna tu a tam
+spadne stisk nebo přepnutí, které pak reaguje o ty 2–4 s později — a to **pro
+všechny klienty naráz**, tedy i pro samotný Connection Server (zpožďuje tak i
+sám sebe).
+
+- **Nepotřebuješ-li Connection Server, vypni ho** — odezva integrace je pak
+  plynulá (jednotka odpovídá ~180 ms).
+- **Potřebuješ-li ho**, zpomal/odlehči v jeho konfiguraci ten periodický sběr
+  stavů (jak často a kolik toho z jednotky čte).
+
+Ověřeno izolačně: integrace sama žádné zamrzání nezpůsobuje — vzniká jen tehdy,
+když je připojený i Connection Server.
+
+> Nesouvisí s tím ani počet klientů: centrální jednotka má **omezený počet ASCII
+> spojení**. Nenechávej na port `22272` mířit spoustu klientů naráz — když se
+> sloty vyčerpají, jednotka spojení sice přijme, ale přestane obsluhovat (HTTP
+> export jede dál) a pomůže až restart CU.
+
 ## Diagnostika
 
 Když něco nesedí, tenhle skript zjistí, co jednotka umí — je read-only, dokud
