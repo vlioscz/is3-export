@@ -13,6 +13,7 @@ from custom_components.is3_export.export import (
     ICON_FAN,
     ICON_LED,
     ICON_MIRROR,
+    ICON_SOCKET,
     PLATFORM_BINARY_SENSOR,
     PLATFORM_BUTTON,
     PLATFORM_LIGHT,
@@ -115,6 +116,19 @@ def test_fans_get_a_fan_icon(name: str) -> None:
     entry = _entry(name)
     assert platform_of(entry) == PLATFORM_SWITCH
     assert entity_icon(entry) == ICON_FAN
+
+
+@pytest.mark.parametrize("name", ["Zas_kuchyne", "ZAS_terasa", "zas_dilna"])
+def test_sockets_get_a_socket_icon(name: str) -> None:
+    """A `zas` relay stays a switch but reads as a power socket."""
+    entry = _entry(name)
+    assert platform_of(entry) == PLATFORM_SWITCH
+    assert entity_icon(entry) == ICON_SOCKET
+
+
+def test_socket_token_is_whole_word_only(name: str = "Zastineni_obyvak") -> None:
+    """`zas` is a whole token, so `zastineni` (shading) gets no socket icon."""
+    assert entity_icon(_entry(name)) is None
 
 
 @pytest.mark.parametrize("name", ["LED_kuchyn", "LEDpas_ob", "Sv_LED_linka", "led_schody"])

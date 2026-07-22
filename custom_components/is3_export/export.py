@@ -308,10 +308,15 @@ LED_PREFIX = "led"
 # is no `ventil` in the exports, and matching it as a prefix might catch one.
 VENT_TOKEN = "vent"
 
+# A switched socket -- `Zas_kuchyne`, `ZAS_terasa`.  A whole token on purpose:
+# as a prefix it would catch `zastineni` (shading) and the like.
+SOCKET_TOKEN = "zas"
+
 ICON_LAMP = "mdi:floor-lamp"
 ICON_MIRROR = "mdi:mirror"
 ICON_LED = "mdi:led-strip-variant"
 ICON_FAN = "mdi:fan"
+ICON_SOCKET = "mdi:power-socket-de"
 
 PLATFORM_BUTTON = "button"
 PLATFORM_LIGHT = "light"
@@ -383,6 +388,8 @@ def entity_icon(entry: Is3Entry) -> str | None:
     elif platform == PLATFORM_SWITCH:
         if VENT_TOKEN in tokens:
             return ICON_FAN
+        if SOCKET_TOKEN in tokens:
+            return ICON_SOCKET
     return None
 
 

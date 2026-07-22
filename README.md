@@ -123,10 +123,12 @@ z pohledu adresy totéž.
 | `zrc` | `light` | zrcadlo |
 | `LED` | `light` | LED pásek |
 | `vent` | `switch` | ventilátor |
+| `zas` | `switch` | zásuvka |
 | `TL` (nebo `DIN` vstup) | `event` (`press` + `long_press`) | — |
 
-`sv`, `imp`, `vent` a `TL` musí sedět jako celý token (jinak by `Svod_vody`
-bylo světlo), `lamp`, `zrc` a `LED` stačí jako předpona.
+`sv`, `imp`, `vent`, `zas` a `TL` musí sedět jako celý token (jinak by
+`Svod_vody` bylo světlo a `Zastineni` zásuvka), `lamp`, `zrc` a `LED` stačí jako
+předpona.
 
 **`TL_`** (tlačítko) udělá `event` tlačítko na **jakémkoli** modulu. **`DIN`**
 vstup je tlačítko na **nástěnných ovladačích** a na **samotné centrální
