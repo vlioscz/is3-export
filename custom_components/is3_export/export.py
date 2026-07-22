@@ -974,6 +974,17 @@ def is_press_button(entry: Is3Entry) -> bool:
     return role is not None and role.upper().startswith("DIN")
 
 
+def is_rf_button(entry: Is3Entry) -> bool:
+    """Whether a button is on an RF remote (RFKEY).
+
+    A wired switch delivers its release reliably and promptly, so the hold
+    length -- and thus short vs long press -- is recoverable.  An RF remote drops
+    or delays the release, so its buttons stay a single ``press``.
+    """
+    module = module_of(entry)
+    return module is not None and module[0] == "RFKEY"
+
+
 def is_battery_input(entry: Is3Entry) -> bool:
     """Whether a digital input is a low-battery flag, such as an RF device's."""
     role = _role_from_hw_id(entry.hw_id) if entry.hw_id else None

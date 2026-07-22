@@ -123,15 +123,15 @@ z pohledu adresy totéž.
 | `zrc` | `light` | zrcadlo |
 | `LED` | `light` | LED pásek |
 | `vent` | `switch` | ventilátor |
-| `TL` (nebo `DIN` vstup) | `event` (`press`) | — |
+| `TL` (nebo `DIN` vstup) | `event` (`press` + `long_press`) | — |
 
 `sv`, `imp`, `vent` a `TL` musí sedět jako celý token (jinak by `Svod_vody`
 bylo světlo), `lamp`, `zrc` a `LED` stačí jako předpona.
 
 **`TL_`** (tlačítko) a **`DIN`** vstupy jsou momentální tlačítka → `event`
-entita s typem `press` (viz [Nástěnné vypínače](#nástěnné-vypínače-wsb)). Platí
-i pro digitální vstupy **na samotné centrální jednotce** (In-Out), ne jen na
-vypínačích.
+entita (drátové rozlišují `press` i `long_press`, viz
+[Nástěnné vypínače](#nástěnné-vypínače-wsb)). Platí i pro digitální vstupy **na
+samotné centrální jednotce** (In-Out), ne jen na vypínačích.
 
 Tlačítko (`imp`) při stisku pošle **puls** — bit na `1` a hned zpět na `0`.
 Klidový stav je vždy `0`, takže každý další stisk je zase čistá náběžná hrana,
@@ -204,29 +204,28 @@ vyplyne to z typu adresy:
 | **WSB3-40** | 12 — 4 tlačítka + 4 LED + 2 teploty + 2 dig. vstupy |
 | **WSB3-*-Hum** | +2 — vlhkost (`%`, `device_class humidity`) a rosný bod (°C) |
 
-Tlačítka (Up/Down/DIN) jsou **`event` entita** s jediným typem **`press`** — ne
-binary_sensor (ten se zasekne, když se ztratí rozepnutí) a **ne rozlišování
-short/long**.
+Tlačítka (Up/Down/DIN) jsou **`event` entita**. Drátové vypínače (WSB) rozlišují
+**krátký `press` a `long_press`**; tlačítka **RF ovladače** hlásí jen `press`.
 
-**Proč jen `press`:** rozlišit krátký a dlouhý stisk vyžaduje změřit dobu
-držení = dobu mezi sepnutím a rozepnutím. Jenže jednotka hlásí rozepnutí
-s **proměnlivým zpožděním** (0 až ~2 s i u rychlého ťuknutí), posílá ho pozdě
-nebo — u RF — vůbec, a **žádný vlastní long-press signál na ASCII portu není**.
-Naměřená doba = skutečné držení + náhodné zpoždění stejně velké jako to držení,
-takže ťuknutí a dlouhý stisk dají tutéž hodnotu. Nejde to spolehlivě — ověřeno
-vyčerpávajícím rozborem.
+**Jak short/long funguje:** rozlišení potřebuje dobu držení = mezeru mezi
+sepnutím (`=1`) a rozepnutím (`=0`). Na drátovém vypínači je tahle mezera čistá a
+konzistentní — ťuknutí padnou pod ~100 ms, záměrná držení nad ~1,5 s, s širokou
+prázdnou mezerou mezi tím. Integrace proto na sepnutí spustí časovač: přijde-li
+dřív rozepnutí, je to krátký `press`; když časovač (0,6 s) doběhne a tlačítko je
+pořád držené, je to `long_press` (vystřelí hned v tom okamžiku). Ztracené
+rozepnutí tlačítko nezasekne — pojistný časovač po chvíli držení uvolní.
 
-`press` se vystřelí na **každou událost sepnutí**, kterou jednotka pošle.
-Tlačítka se totiž **nededupují** — integrace normálně probudí entitu jen při
-změně hodnoty, ale u tlačítek reaguje na každou událost. Kdyby se totiž
-rozepnutí zpozdilo nebo ztratilo (hodnota by zůstala na `1`), byl by další
-stisk „beze změny" a zahodil by se → **stisk by zmizel** (odtud „musím 3×").
-Takhle **každé ťuknutí spolehlivě projde**, ať se rozepnutí chová jakkoliv.
+> ⚠️ **Podmínka spolehlivého short/long: neběžící Connection Server.** Jeho
+> periodický sběr jednotku na pár sekund zmrazí a dobu držení rozmaže (viz sekci
+> **Connection Server zpomaluje odezvu** níže). Původně to kvůli tomu vypadalo
+> jako slepá ulička; v čistých podmínkách je timing spolehlivý.
 
-Krátký debounce (~0,5 s) spolkne jen okamžité dvojposlání téhož stisku (jeden
-stisk = jedna událost). Kompromis: **držení** tlačítka (které jednotka
-přeposílá) vystřelí `press` opakovaně — pro ťukání, na které jsou tato tlačítka,
-to nevadí.
+**RF ovladače zůstávají jen na `press`** — jejich rozepnutí se ztrácí příliš
+často, doba držení tam spolehlivá není. `press` se u nich vystřelí na **každou
+událost sepnutí**; tlačítka se přitom **nededupují** (integrace normálně probudí
+entitu jen při změně hodnoty), aby ztracené rozepnutí neschovalo další stisk —
+jinak by byl další stisk „beze změny" a zahodil by se (odtud dřívější „musím
+3×"). Krátký debounce (~0,5 s) spolkne jen okamžité dvojposlání téhož stisku.
 
 > Senzory se naopak **utlumují** (max ~1 notifikace/s), aby ukecaný analogový
 > vstup CU nezahltil smyčku — hodnota se ukládá dál, jen se stav nezapisuje

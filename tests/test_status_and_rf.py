@@ -19,6 +19,7 @@ from custom_components.is3_export.export import (
     enabled_by_default,
     is_battery_input,
     is_press_button,
+    is_rf_button,
     module_of,
     parse_export,
     platform_of,
@@ -69,6 +70,8 @@ def test_rf_device_groups_under_its_own_device(export) -> None:
     """An RF key fob's channels group under one RF device, off the central unit."""
     button = export.by_address(0x010100B1)
     assert module_of(button) == ("RFKEY", "0D0009")
+    # An RF button keeps single-press: its release is lost too often for timing.
+    assert is_rf_button(button)
     sensor = Is3BinarySensor(_Coord(), button)
     assert sensor.device_info["identifiers"] == {(DOMAIN, "mod_0D0009")}
     assert sensor.device_info["via_device"] == (DOMAIN, "mod")
