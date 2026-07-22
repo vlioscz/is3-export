@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from custom_components.is3_export.cover import needs_release_first
+import asyncio
+
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from custom_components.is3_export.cover import Is3CoverEntity, needs_release_first
 from custom_components.is3_export.export import (
     find_covers,
     is_switchable,
@@ -41,6 +45,33 @@ def test_program_bits_win_over_relays(export, covers) -> None:
     """
     assert all(cover.source == "systembit" for cover in covers.values())
     assert set(covers) == {"ZALUZIE_pokoj", "ZAL_kuchyn"}
+
+
+def test_cover_subscribes_to_its_direction_channels(covers, monkeypatch) -> None:
+    """The blind wakes on its own up/down channels, not the coordinator's blanket
+    refresh -- so it updates live once that refresh stops waking every entity."""
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(CoordinatorEntity, "async_added_to_hass", _noop)
+
+    subscribed: list[int] = []
+
+    class _Coord:
+        def async_add_address_listener(self, address, _cb):
+            subscribed.append(address)
+            return lambda: None
+
+    cover = covers["ZALUZIE_pokoj"]
+    entity = Is3CoverEntity.__new__(Is3CoverEntity)
+    entity.cover = cover
+    entity.coordinator = _Coord()
+    entity.async_on_remove = lambda _fn: None
+    entity.async_write_ha_state = lambda: None
+
+    asyncio.run(entity.async_added_to_hass())
+    assert set(subscribed) == {cover.open.address, cover.close.address}
 
 
 def test_first_naming_convention(covers) -> None:

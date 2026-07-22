@@ -48,7 +48,7 @@ def _coord(throttled: set[int]):
     coord._values = {}
     coord._updated_at = {}
     coord._pending = {}
-    coord._listeners = {}
+    coord._address_listeners = {}
     coord._throttled = frozenset(throttled)
     coord._notified_at = {}
     coord._flush_scheduled = set()
@@ -57,13 +57,32 @@ def _coord(throttled: set[int]):
     return coord, clock, loop
 
 
+def test_update_listeners_wake_only_on_availability_change() -> None:
+    """The 30s refresh no longer wakes every entity: only an availability flip
+    propagates, and iterating the base registry does not touch (or trip over) the
+    separate address-listener dict -- the old name collision that crashed it."""
+    coord = Is3Coordinator.__new__(Is3Coordinator)
+    woke: list[int] = []
+    coord._listeners = {0: (lambda: woke.append(1), None)}  # the base registry
+    coord._address_listeners = {0x0102000A: [lambda: None]}  # ours, kept apart
+    coord._availability_broadcast = True
+    coord.last_update_success = True
+
+    coord.async_update_listeners()  # nothing changed -> no wake, and no crash
+    assert woke == []
+
+    coord.last_update_success = False
+    coord.async_update_listeners()  # availability flipped -> propagate once
+    assert woke == [1]
+
+
 def test_a_button_wakes_on_every_event_even_a_repeat() -> None:
     """A momentary button is not deduped: a repeated on-event (its release was
     lost, so the value never fell) still wakes its entity, so the press is seen."""
     coord, clock, loop = _coord(throttled=set())
     coord._momentary = frozenset({BUTTON})
     woken = []
-    coord._listeners[BUTTON] = [lambda: woken.append(1)]
+    coord._address_listeners[BUTTON] = [lambda: woken.append(1)]
     coord.handle_event(BUTTON, 1)  # press
     coord.handle_event(BUTTON, 1)  # the value never fell; the repeat still wakes
     assert len(woken) == 2
@@ -72,7 +91,7 @@ def test_a_button_wakes_on_every_event_even_a_repeat() -> None:
 def test_a_button_wakes_its_entity_on_every_change() -> None:
     coord, clock, loop = _coord(throttled=set())
     woken = []
-    coord._listeners[BUTTON] = [lambda: woken.append(clock.now)]
+    coord._address_listeners[BUTTON] = [lambda: woken.append(clock.now)]
     coord.handle_event(BUTTON, 1)
     coord.handle_event(BUTTON, 0)
     assert len(woken) == 2
@@ -82,7 +101,7 @@ def test_a_button_wakes_its_entity_on_every_change() -> None:
 def test_a_sensor_flood_wakes_at_most_once_per_window() -> None:
     coord, clock, loop = _coord(throttled={SENSOR})
     woken = []
-    coord._listeners[SENSOR] = [lambda: woken.append(clock.now)]
+    coord._address_listeners[SENSOR] = [lambda: woken.append(clock.now)]
 
     coord.handle_event(SENSOR, 100)  # first change wakes at once
     assert len(woken) == 1
@@ -105,7 +124,7 @@ def test_a_sensor_flood_wakes_at_most_once_per_window() -> None:
 def test_a_sensor_change_after_the_window_wakes_at_once() -> None:
     coord, clock, loop = _coord(throttled={SENSOR})
     woken = []
-    coord._listeners[SENSOR] = [lambda: woken.append(1)]
+    coord._address_listeners[SENSOR] = [lambda: woken.append(1)]
 
     coord.handle_event(SENSOR, 100)
     assert len(woken) == 1

@@ -119,7 +119,11 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         self.reads_supported = False
         self._values: dict[int, int] = {}
         self._seeded = False
-        self._listeners: dict[int, list[CALLBACK_TYPE]] = {}
+        # Per-address subscriptions (kept apart from the base coordinator's own
+        # ``_listeners``, which is a different registry).
+        self._address_listeners: dict[int, list[CALLBACK_TYPE]] = {}
+        # Last availability broadcast to entities; see async_update_listeners.
+        self._availability_broadcast = True
         # address -> (time written, value written), while a command is settling.
         self._pending: dict[int, tuple[float, int]] = {}
         # address -> time its value last changed, from an event or a write.
@@ -140,6 +144,22 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         return self._values
 
     @callback
+    def async_update_listeners(self) -> None:
+        """Wake entities only when their availability changes.
+
+        Every entity follows its own address live through
+        ``async_add_address_listener``, so the base coordinator's habit of waking
+        *every* listener on each 30s refresh is redundant -- and on a large site
+        it is a synchronous burst of hundreds of state writes.  The one thing a
+        per-address update does not carry is availability (``last_update_success``),
+        so propagate just that, and only when it actually flips.
+        """
+        if self.last_update_success == self._availability_broadcast:
+            return
+        self._availability_broadcast = self.last_update_success
+        super().async_update_listeners()
+
+    @callback
     def async_add_address_listener(
         self, address: int, update: CALLBACK_TYPE
     ) -> CALLBACK_TYPE:
@@ -149,17 +169,17 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         analog input.  Waking every entity for each of those would be a state
         write storm, so events are delivered only to the entity concerned.
         """
-        self._listeners.setdefault(address, []).append(update)
+        self._address_listeners.setdefault(address, []).append(update)
 
         @callback
         def remove() -> None:
             """Unsubscribe."""
-            listeners = self._listeners.get(address)
+            listeners = self._address_listeners.get(address)
             if listeners is None:
                 return
             listeners.remove(update)
             if not listeners:
-                del self._listeners[address]
+                del self._address_listeners[address]
 
         return remove
 
@@ -270,7 +290,7 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
     @callback
     def _async_notify(self, address: int) -> None:
         """Wake every entity listening on an address, now."""
-        for update in self._listeners.get(address, ()):
+        for update in self._address_listeners.get(address, ()):
             update()
 
     @callback

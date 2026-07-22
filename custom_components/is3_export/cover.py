@@ -115,6 +115,21 @@ class Is3CoverEntity(CoordinatorEntity[Is3Coordinator], CoverEntity):
             features |= CoverEntityFeature.OPEN_TILT | CoverEntityFeature.CLOSE_TILT
         self._attr_supported_features = features
 
+    async def async_added_to_hass(self) -> None:
+        """Wake this blind when either direction it shows changes.
+
+        The state a cover displays is the two direction channels (is_opening /
+        is_closing), so it subscribes to those, like every other entity -- rather
+        than leaning on the coordinator's blanket refresh, which is suppressed.
+        """
+        await super().async_added_to_hass()
+        for address in (self.cover.open.address, self.cover.close.address):
+            self.async_on_remove(
+                self.coordinator.async_add_address_listener(
+                    address, self.async_write_ha_state
+                )
+            )
+
     @property
     def extra_state_attributes(self) -> dict[str, str]:
         """Expose the addresses behind the blind, for matching to the export."""
