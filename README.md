@@ -178,8 +178,12 @@ kořen `<název> Controller_<sériové>`. Z nich vznikne jedna entita `climate`:
 | topení / chlazení | `Control-HC-IN` — 0 topení, 1 chlazení |
 | zapnuto / vypnuto | `Control-IN` — 0 vyp, 1 zap |
 
-Přes `Control-HC-IN` se zóna přepíná mezi režimy **Heat** a **Cool** (kde je
-chladicí výstup zapojený). Chlazení má vlastní setpointy: `Required-Cool-Therm-AOUT`
+Režim **Cool** se u zóny nabídne **jen když má reálně zapojený chladicí výstup**.
+Chladicí kanály (`Control-HC-IN`, `Required-Cool-*`) totiž nese *každá* zóna, takže
+jejich přítomnost nestačí — schopnost pozná až kořenový řádek regulátoru: topná
+zóna má flags `0x05` s prázdnými chladicími sloty plánu, zóna s chlazením `0x3F`
+s vyplněnými (ověřeno na jednotce). Kde je Cool k dispozici, přepíná se přes
+`Control-HC-IN` a chlazení má vlastní setpointy: `Required-Cool-Therm-AOUT`
 (v platnosti) a `Manual-Cool-Therm-AIN` (manuální).
 
 Nastavení teploty přepne zónu do Manualu a zapíše `Manual-Therm-AIN` (topení),

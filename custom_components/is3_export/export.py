@@ -710,6 +710,7 @@ class Is3Controller:
     cool_required: int | None = None
     cool_manual: int | None = None
     status: int | None = None
+    has_cooling: bool = False
 
     @property
     def unique_id(self) -> str:
@@ -738,10 +739,41 @@ class Is3Controller:
         return addresses
 
 
+# Every controller carries the cool channels, whether or not a cooling output is
+# wired to the zone -- so their presence cannot say if the zone can cool.  What
+# does is the controller's own root entry: a heating-only zone reads a flags byte
+# of 0x05 with the cool plan slots empty, while a zone with cooling configured
+# reads 0x3F with them filled.  Cooling bit 0x02 of the flags, and the cool half
+# of each heat/cool plan-slot pair being non-zero, both mark it (verified live on
+# the one cooling zone).  Cooling is offered only where this holds.
+_COOLING_FLAG = 0x02
+
+
+def _hex_or_zero(text: str) -> int:
+    """Parse a hex field like ``0x3F``; anything unparseable counts as zero."""
+    try:
+        return int(text, 16)
+    except ValueError:
+        return 0
+
+
+def _controller_has_cooling(entry: Is3Entry) -> bool:
+    """Whether a controller's root entry marks a cooling output as configured."""
+    extra = entry.extra
+    if extra and _hex_or_zero(extra[0]) & _COOLING_FLAG:
+        return True
+    if len(extra) >= 2:
+        # The plan slots are heat/cool pairs; the cool ones (odd indices) are
+        # non-zero only when cooling is set up.
+        return any(_hex_or_zero(slot) for slot in extra[1].split("_")[1::2])
+    return False
+
+
 def find_controllers(export: Is3Export) -> list[Is3Controller]:
     """Assemble heating zones from the controller channels in the export."""
     roles: dict[str, dict[str, int]] = {}
     names: dict[str, str] = {}
+    cooling: dict[str, bool] = {}
 
     for entry in export.entries:
         match = _CONTROLLER_ID.match(entry.hw_id or "")
@@ -750,6 +782,7 @@ def find_controllers(export: Is3Export) -> list[Is3Controller]:
         serial = match["serial"]
         if match["role"] is None:
             names[serial] = entry.name if entry.labelled else f"Controller {serial}"
+            cooling[serial] = _controller_has_cooling(entry)
         else:
             roles.setdefault(serial, {})[match["role"]] = entry.address
 
@@ -773,6 +806,7 @@ def find_controllers(export: Is3Export) -> list[Is3Controller]:
                 cool_required=channels.get("Required-Cool-Therm-AOUT"),
                 cool_manual=channels.get("Manual-Cool-Therm-AIN"),
                 status=channels.get("Status-DOUT"),
+                has_cooling=cooling.get(serial, False),
             )
         )
     return controllers

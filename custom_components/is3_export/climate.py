@@ -104,9 +104,11 @@ class Is3Climate(CoordinatorEntity[Is3Coordinator], ClimateEntity):
         self._attr_unique_id = f"{config_entry_id}_{controller.unique_id}"
         self._attr_name = controller.name.replace("_", " ")
 
-        # Cooling is offered only where the zone exposes the heat/cool switch.
+        # Cooling is offered only where the zone actually has a cooling output
+        # configured -- every zone carries the cool channels, so their presence
+        # is not enough; the controller's root marks the real capability.
         modes = [HVACMode.HEAT]
-        if controller.control_hc is not None:
+        if controller.has_cooling and controller.control_hc is not None:
             modes.append(HVACMode.COOL)
         # A zone can be turned off only if it exposes the Control-IN switch.
         if controller.control_on is not None:

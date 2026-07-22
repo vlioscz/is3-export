@@ -13,7 +13,12 @@ from homeassistant.components.climate import HVACAction, HVACMode
 
 import custom_components.is3_export.climate as climate_module
 from custom_components.is3_export.climate import Is3Climate
-from custom_components.is3_export.export import PRESET_MANUAL, Is3Controller
+from custom_components.is3_export.export import (
+    PRESET_MANUAL,
+    Is3Controller,
+    _controller_has_cooling,
+    parse_export,
+)
 
 # Bedroom channel addresses, as in the climate fixture.
 ACTUAL = 0x01080025
@@ -43,6 +48,7 @@ def _controller() -> Is3Controller:
         cool_demand=COOL_DEMAND,
         cool_required=COOL_REQUIRED,
         cool_manual=COOL_MANUAL,
+        has_cooling=True,
     )
 
 
@@ -140,6 +146,32 @@ def test_heat_only_zone_offers_just_heat() -> None:
     )
     entity = Is3Climate(coord, controller)
     assert entity.hvac_modes == [HVACMode.HEAT]
+
+
+def test_cool_channels_without_a_cooling_output_offer_no_cool() -> None:
+    """Every zone carries the cool channels; cool is offered only when the zone's
+    root marks a cooling output (has_cooling), not merely because they exist."""
+    coord = _FullCoord({})
+    controller = _controller()
+    controller.has_cooling = False  # cool channels present, but no cooling output
+    entity = Is3Climate(coord, controller)
+    assert HVACMode.COOL not in entity.hvac_modes
+    assert entity.hvac_modes == [HVACMode.OFF, HVACMode.HEAT]
+
+
+def test_cooling_capability_is_read_from_the_controller_root() -> None:
+    """A heating-only root reads flags 0x05 with empty cool plan slots; a zone
+    with a cooling output reads 0x3F with them filled (verified on the live unit)."""
+    cool = parse_export(
+        "Z Controller_0E0001 0x0003002A 0x00000006 0x3F "
+        "0x05010006_0x05010006_0x05010004_0x05010004_0x05050001_0x05050001"
+    ).entries[0]
+    heat = parse_export(
+        "Z Controller_0E0002 0x0003002B 0x00000006 0x05 "
+        "0x05010005_0x00000000_0x05010004_0x00000000_0x00000000_0x00000000"
+    ).entries[0]
+    assert _controller_has_cooling(cool)
+    assert not _controller_has_cooling(heat)
 
 
 def test_setting_cool_mode_writes_the_switch() -> None:
