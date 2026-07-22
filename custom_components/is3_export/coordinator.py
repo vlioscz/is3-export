@@ -65,6 +65,14 @@ WRITE_VERIFY_DELAY = 1.5
 # the notification is coalesced.  Buttons and outputs are never throttled.
 NOTIFY_THROTTLE = 1.0
 
+# An address can answer with no value -- a schedule, plan or scene replies "N",
+# a failed sensor "???" -- or not answer at all.  Retrying such an address on
+# every scan keeps a GET burst on the one shared connection, and the unit
+# answers those ahead of pushing its events, so a button press lands late.  So a
+# no-value address is retried only this many times, then left to the event
+# stream; one that does answer drops out of the retry set at once.
+MAX_SEED_ATTEMPTS = 3
+
 
 @dataclass(slots=True)
 class Is3Data:
@@ -122,6 +130,9 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         self._flush_scheduled: set[int] = set()
         # Button addresses: momentary, so delivered on every event, not deduped.
         self._momentary: frozenset[int] = frozenset()
+        # address -> times it was read and answered no value; capped so a
+        # permanently-"N" address stops being re-read every scan (see below).
+        self._seed_attempts: dict[int, int] = {}
 
     @property
     def values(self) -> dict[int, int]:
@@ -342,7 +353,9 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         unread = [
             e.address_hex
             for e in export.entries
-            if is_readable(e) and e.address not in self._values
+            if is_readable(e)
+            and e.address not in self._values
+            and self._seed_attempts.get(e.address, 0) < MAX_SEED_ATTEMPTS
         ]
         if unread:
             await self._async_seed(unread[:INITIAL_READ_LIMIT])
@@ -369,6 +382,8 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
             except Is3Error as err:
                 raise UpdateFailed(f"Cannot read {address}: {err}") from err
             if value is None:
+                # No value now; count the miss so we eventually stop asking.
+                self._seed_attempts[key] = self._seed_attempts.get(key, 0) + 1
                 continue
 
             if self._updated_at.get(key, 0.0) > asked_at:

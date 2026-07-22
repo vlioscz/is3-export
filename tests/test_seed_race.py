@@ -67,6 +67,7 @@ def _coordinator(clock: _Clock) -> Is3Coordinator:
     coord._notified_at = {}
     coord._flush_scheduled = set()
     coord._momentary = frozenset()
+    coord._seed_attempts = {}
     return coord
 
 

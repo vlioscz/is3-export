@@ -53,6 +53,7 @@ def _coord(throttled: set[int]):
     coord._notified_at = {}
     coord._flush_scheduled = set()
     coord._momentary = frozenset()
+    coord._seed_attempts = {}
     return coord, clock, loop
 
 

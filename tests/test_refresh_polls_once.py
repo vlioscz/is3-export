@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 
-from custom_components.is3_export.coordinator import Is3Coordinator
+from custom_components.is3_export.coordinator import MAX_SEED_ATTEMPTS, Is3Coordinator
 from custom_components.is3_export.export import Is3Entry, Is3Export
 
 RELAY = 0x0102000A  # a writable output, re-read every cycle before this fix
@@ -59,6 +59,7 @@ def _coordinator(export: Is3Export, client: _Client) -> Is3Coordinator:
     coord._notified_at = {}
     coord._flush_scheduled = set()
     coord._momentary = frozenset()
+    coord._seed_attempts = {}
 
     async def _read_export() -> Is3Export:
         return export
@@ -82,18 +83,20 @@ def test_a_reported_output_is_not_reread() -> None:
     assert client.reads == [], "an output that has reported is left to its events"
 
 
-def test_an_address_that_never_answered_is_retried() -> None:
-    """An address that returns no value is not 'reported', so it keeps being read."""
+def test_a_no_value_address_is_retried_then_left_alone() -> None:
+    """An address that keeps answering "no value" is retried a few times, then
+    dropped -- otherwise a permanently-"N" schedule keeps a GET burst going."""
     export = Is3Export(
-        entries=[Is3Entry(name="Teplota", address=SENSOR, value=None, unit="°C")]
+        entries=[Is3Entry(name="Program", address=SENSOR, value=None, unit="°C")]
     )
-    client = _Client({})  # the sensor answers nothing
+    client = _Client({})  # the address never answers a value
     coord = _coordinator(export, client)
 
-    asyncio.run(coord._async_update_data())
-    assert client.reads == [SENSOR_HEX]
+    for _ in range(MAX_SEED_ATTEMPTS):
+        asyncio.run(coord._async_update_data())
+    assert client.reads == [SENSOR_HEX] * MAX_SEED_ATTEMPTS, "retried up to the cap"
     assert SENSOR not in coord.values
 
     client.reads.clear()
     asyncio.run(coord._async_update_data())
-    assert client.reads == [SENSOR_HEX], "a never-answered address is retried"
+    assert client.reads == [], "past the cap it is left to the event stream"
