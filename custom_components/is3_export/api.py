@@ -294,6 +294,14 @@ class Is3Client:
                     )
 
             self._handle_line(line)
+            # Yield to the loop after every line.  readuntil() does not suspend
+            # while the next line is already buffered, so during the unit's
+            # analog burst the reader would drain the whole buffer in one
+            # non-suspending step -- and the callbacks a line schedules (the
+            # automation an event fires, the UI push) only run once the reader
+            # yields.  That is what delayed a button press by up to the length
+            # of the burst.  A bare sleep(0) hands the loop one turn to run them.
+            await asyncio.sleep(0)
 
         # The stream ended. Unless we are shutting down, the connection dropped
         # under us -- a unit reboot or a network blip -- and we would otherwise
