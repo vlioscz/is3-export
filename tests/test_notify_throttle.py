@@ -52,7 +52,20 @@ def _coord(throttled: set[int]):
     coord._throttled = frozenset(throttled)
     coord._notified_at = {}
     coord._flush_scheduled = set()
+    coord._momentary = frozenset()
     return coord, clock, loop
+
+
+def test_a_button_wakes_on_every_event_even_a_repeat() -> None:
+    """A momentary button is not deduped: a repeated on-event (its release was
+    lost, so the value never fell) still wakes its entity, so the press is seen."""
+    coord, clock, loop = _coord(throttled=set())
+    coord._momentary = frozenset({BUTTON})
+    woken = []
+    coord._listeners[BUTTON] = [lambda: woken.append(1)]
+    coord.handle_event(BUTTON, 1)  # press
+    coord.handle_event(BUTTON, 1)  # the value never fell; the repeat still wakes
+    assert len(woken) == 2
 
 
 def test_a_button_wakes_its_entity_on_every_change() -> None:

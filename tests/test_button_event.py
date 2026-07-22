@@ -49,15 +49,10 @@ def test_a_button_is_an_event_not_a_binary_sensor(export) -> None:
 class _Coord:
     def __init__(self) -> None:
         self.values: dict[int, int] = {}
-        self.reset_calls: list[int] = []
-
-    def async_reset(self, address: int) -> None:
-        self.reset_calls.append(address)
-        self.values[address] = 0
 
 
 def _button(monkeypatch) -> tuple[Is3ButtonEvent, list]:
-    """A button event wired to a fake refractory timer that fires when told."""
+    """A button event wired to a fake debounce timer that fires when told."""
     timers: list[dict] = []
 
     def fake_call_later(hass, delay, action):
@@ -83,54 +78,44 @@ def _button(monkeypatch) -> tuple[Is3ButtonEvent, list]:
     return entity, timers
 
 
-def test_a_press_fires_once_on_the_leading_edge(monkeypatch) -> None:
+def test_a_press_fires_once(monkeypatch) -> None:
     entity, timers = _button(monkeypatch)
     entity.coordinator.values[UP] = 1
-    entity._handle_change()  # the 0 -> 1 edge
+    entity._handle_change()  # an "on" event
     assert entity.fired == [PRESS]
     assert entity._active
-    assert len(timers) == 1, "the refractory window is armed"
+    assert len(timers) == 1, "the debounce window is armed"
 
 
-def test_rebroadcasts_and_the_release_are_swallowed(monkeypatch) -> None:
-    """The on state re-broadcast while held, and the release, add nothing."""
+def test_the_immediate_resend_is_swallowed(monkeypatch) -> None:
+    """The unit's re-send of the same press, and the release, add nothing."""
     entity, timers = _button(monkeypatch)
     entity.coordinator.values[UP] = 1
     entity._handle_change()  # press
-    entity._handle_change()  # a re-broadcast "=1" while still held
+    entity._handle_change()  # the same "on" re-sent at once
     entity.coordinator.values[UP] = 0
-    entity._handle_change()  # the release
+    entity._handle_change()  # the release: an off event is not a press
     assert entity.fired == [PRESS]
-
-
-def test_the_window_end_clears_the_input(monkeypatch) -> None:
-    """When the refractory ends, the input is forced off so the next press is fresh."""
-    entity, timers = _button(monkeypatch)
-    entity.coordinator.values[UP] = 1
-    entity._handle_change()  # press
-    timers[0]["action"](None)  # the window ends
-    assert entity._active is False
-    assert entity.coordinator.reset_calls == [UP]
 
 
 def test_the_next_press_fires_after_the_window(monkeypatch) -> None:
     entity, timers = _button(monkeypatch)
     entity.coordinator.values[UP] = 1
     entity._handle_change()  # press 1
-    timers[0]["action"](None)  # window ends -> value reset to 0
+    timers[0]["action"](None)  # the debounce ends
+    entity.coordinator.values[UP] = 0
+    entity._handle_change()  # release
     entity.coordinator.values[UP] = 1
-    entity._handle_change()  # press 2 on a fresh edge
+    entity._handle_change()  # press 2
     assert entity.fired == [PRESS, PRESS]
 
 
-def test_a_lost_release_does_not_wedge_the_button(monkeypatch) -> None:
-    """No release arrives; the window still clears the stuck value, so the next
-    press is seen -- the "first press nothing, second press wrong" cure."""
+def test_a_press_fires_even_when_the_value_never_fell(monkeypatch) -> None:
+    """A lost release leaves the value on; the next "on" event still fires -- the
+    coordinator delivers it un-deduped, curing the "press it three times" bug."""
     entity, timers = _button(monkeypatch)
     entity.coordinator.values[UP] = 1
-    entity._handle_change()  # press 1 (its release will be lost)
-    timers[0]["action"](None)  # window ends -> async_reset forces the value off
-    assert entity.coordinator.values[UP] == 0
-    entity.coordinator.values[UP] = 1
-    entity._handle_change()  # press 2 detected despite the lost release
+    entity._handle_change()  # press 1
+    timers[0]["action"](None)  # debounce ends; the value stays on (release lost)
+    entity._handle_change()  # press 2 on the same on-value
     assert entity.fired == [PRESS, PRESS]

@@ -11,16 +11,18 @@ hold plus a random delay as large as the hold itself, so a tap and a long press
 give the same reading. This was checked exhaustively; duration is simply not
 carried on the wire.
 
-So a press is reported the moment the input goes on, the unit's immediate
-re-send of the on state is swallowed for a short window so one press is one
-event, and the input is then forced back off locally -- so a delayed or lost
-release cannot leave the value on and make the next press look like no change,
-which was making taps go missing. Quick taps therefore each register.
+So a press is reported on every "on" event the unit pushes.  The coordinator
+delivers those un-deduped for buttons (it normally wakes an entity only on a
+value change), because the release event can be delayed or lost -- leaving the
+value on -- and then the next press's on event, being "no change", would be
+dropped and the press would go missing.  Firing on the raw on event instead
+means every press registers, however the release behaves.
 
-The window is kept short deliberately, so it does not swallow genuine quick
-taps. The trade-off is that physically holding a button, which the unit
-re-broadcasts every second or two, fires a press for each re-broadcast -- fine
-for the taps these buttons are used for.
+A short debounce swallows only the unit's immediate re-send of the same press,
+so one physical press is one event; it is kept short so genuine quick taps each
+get through.  The trade-off is that physically holding a button, which the unit
+re-broadcasts every second or two, fires a press per re-broadcast -- fine for
+the taps these buttons are used for.
 """
 
 from __future__ import annotations
@@ -36,13 +38,12 @@ from .export import Is3Entry, is_press_button
 
 PRESS = "press"
 
-# A short window after a press, just long enough to swallow the unit's immediate
-# re-send of the on state (a "double tap" of the same press, seen ~0.1s later)
-# so one physical press is one event.  Kept short on purpose: a longer window
-# would also swallow genuine quick taps.  At its end the input is forced back
-# off, so a delayed or lost release cannot leave the value on and make the next
-# press look like no change -- which was making taps go missing.
-REFRACTORY_SECONDS = 0.5
+# A press fires on every "on" event the unit pushes -- the coordinator delivers
+# them un-deduped for buttons -- so a lost release leaving the value on cannot
+# make the next press look like no change.  This short window only swallows the
+# unit's immediate re-send of the same press (seen ~0.1s later), so one physical
+# press is one event; kept short so genuine quick taps each get through.
+DEBOUNCE_SECONDS = 0.5
 
 
 async def async_setup_entry(
@@ -86,27 +87,22 @@ class Is3ButtonEvent(Is3Entity, EventEntity):
 
     @callback
     def _handle_change(self) -> None:
-        """Fire once on the leading edge; swallow the rest of the interaction."""
+        """Fire on every "on" event; swallow the immediate re-send."""
         if not self.coordinator.values.get(self._address):
-            # A release, or the end-of-interaction reset: never fires.
+            # A release (=0): the press is the on event, not the off.
             return
         if self._active:
-            # A re-broadcast of the on state while still held: swallow it.
+            # The unit's immediate re-send of this same press: swallow it.
             return
         self._active = True
         self._fire(PRESS)
-        self._cancel = async_call_later(
-            self.hass, REFRACTORY_SECONDS, self._end_interaction
-        )
+        self._cancel = async_call_later(self.hass, DEBOUNCE_SECONDS, self._end)
 
     @callback
-    def _end_interaction(self, _now) -> None:
-        """Close the window and force the input off, so the next press is fresh."""
+    def _end(self, _now) -> None:
+        """Close the debounce window; the next on event is a new press."""
         self._cancel = None
         self._active = False
-        # Clear the stored value: a lost release could leave it on, and then the
-        # next press's on-event would be deduped as no change and never seen.
-        self.coordinator.async_reset(self._address)
 
     @callback
     def _fire(self, event_type: str) -> None:
@@ -116,7 +112,7 @@ class Is3ButtonEvent(Is3Entity, EventEntity):
 
     @callback
     def _stop(self) -> None:
-        """Cancel the pending refractory timer, if any."""
+        """Cancel the pending debounce timer, if any."""
         if self._cancel is not None:
             self._cancel()
             self._cancel = None

@@ -216,13 +216,21 @@ Naměřená doba = skutečné držení + náhodné zpoždění stejně velké ja
 takže ťuknutí a dlouhý stisk dají tutéž hodnotu. Nejde to spolehlivě — ověřeno
 vyčerpávajícím rozborem.
 
-Proto se `press` vystřelí hned na **náběžné hraně** sepnutí, okamžité
-dvojposlání jednotky se na **krátké okno (~0,5 s)** spolkne (jeden stisk = jedna
-událost) a vstup se pak lokálně srovná na 0 — takže pozdní ani ztracené
-rozepnutí nezasekne hodnotu a **každé ťuknutí spolehlivě projde**. Okno je
-schválně krátké, aby nespolklo rychlé ťukání. Kompromis: **držení** tlačítka
-(které jednotka přeposílá) vystřelí `press` opakovaně — pro ťukání, na které
-jsou tato tlačítka, to nevadí.
+`press` se vystřelí na **každou událost sepnutí**, kterou jednotka pošle.
+Tlačítka se totiž **nededupují** — integrace normálně probudí entitu jen při
+změně hodnoty, ale u tlačítek reaguje na každou událost. Kdyby se totiž
+rozepnutí zpozdilo nebo ztratilo (hodnota by zůstala na `1`), byl by další
+stisk „beze změny" a zahodil by se → **stisk by zmizel** (odtud „musím 3×").
+Takhle **každé ťuknutí spolehlivě projde**, ať se rozepnutí chová jakkoliv.
+
+Krátký debounce (~0,5 s) spolkne jen okamžité dvojposlání téhož stisku (jeden
+stisk = jedna událost). Kompromis: **držení** tlačítka (které jednotka
+přeposílá) vystřelí `press` opakovaně — pro ťukání, na které jsou tato tlačítka,
+to nevadí.
+
+> Senzory se naopak **utlumují** (max ~1 notifikace/s), aby ukecaný analogový
+> vstup CU nezahltil smyčku — hodnota se ukládá dál, jen se stav nezapisuje
+> pořád. Tím zůstává zpracování tlačítek svižné.
 
 Stav baterie RF ovladače je běžný `binary_sensor` (battery), ne tlačítko.
 

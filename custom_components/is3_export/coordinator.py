@@ -28,6 +28,7 @@ from .const import DEFAULT_SCAN_INTERVAL, DOMAIN, EXPORT_RELOAD_INTERVAL
 from .export import (
     PLATFORM_SENSOR,
     Is3Export,
+    is_press_button,
     is_readable,
     is_writable,
     platform_of,
@@ -120,6 +121,8 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         self._throttled: frozenset[int] = frozenset()
         self._notified_at: dict[int, float] = {}
         self._flush_scheduled: set[int] = set()
+        # Button addresses: momentary, so delivered on every event, not deduped.
+        self._momentary: frozenset[int] = frozenset()
 
     @property
     def values(self) -> dict[int, int]:
@@ -190,18 +193,6 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         self._pending[address] = (self.hass.loop.time(), value)
         self._async_store(address, value)
 
-    @callback
-    def async_reset(self, address: int) -> None:
-        """Force a momentary input back to zero.
-
-        A button's release event can be lost -- an RF fob's especially -- which
-        would leave the input stuck on, since values are only stored on change.
-        The button's event entity calls this after a plausible hold with no
-        release, so the input clears and the next press is seen again.
-        """
-        self._pending.pop(address, None)
-        self._async_store(address, 0)
-
     async def async_command(self, address: int, value: int) -> None:
         """Write a value, show it at once, and confirm the output followed.
 
@@ -251,9 +242,12 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         """Store a value and wake the entity that owns the address.
 
         A sensor's wake is rate-limited so a chatty analog input cannot flood the
-        loop; the value is stored regardless, so a later read is current.
+        loop; the value is stored regardless, so a later read is current.  A
+        button is momentary and wakes on every event, even a repeat of the on
+        state -- otherwise a press whose release was lost, leaving the value on,
+        would be dropped here as no change and go missing.
         """
-        if self._values.get(address) == value:
+        if address not in self._momentary and self._values.get(address) == value:
             return
         self._values[address] = value
         self._updated_at[address] = self.hass.loop.time()
@@ -322,6 +316,11 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
             entry.address
             for entry in export.entries
             if platform_of(entry) == PLATFORM_SENSOR
+        )
+        # Buttons are momentary: every press event matters, even one repeating
+        # the on state, so they bypass the same-value dedup below.
+        self._momentary = frozenset(
+            entry.address for entry in export.entries if is_press_button(entry)
         )
 
         if not self.reads_supported:
