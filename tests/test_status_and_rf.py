@@ -16,6 +16,7 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from custom_components.is3_export.binary_sensor import Is3BinarySensor
 from custom_components.is3_export.const import DOMAIN
 from custom_components.is3_export.export import (
+    Is3Entry,
     enabled_by_default,
     is_battery_input,
     is_press_button,
@@ -85,6 +86,13 @@ def test_low_battery_input_is_a_battery_sensor(export) -> None:
     assert sensor.device_class == BinarySensorDeviceClass.BATTERY
     # It is a real reading worth seeing, so it stays enabled.
     assert enabled_by_default(battery) is True
+
+
+def test_a_motion_detector_reads_as_motion() -> None:
+    """A PMS3/DMD3 detector's digital input carries the motion device_class."""
+    entry = Is3Entry(name="Pohyb", address=0x01010001, hw_id="PMS3-01_Motion_0A0001")
+    sensor = Is3BinarySensor(_Coord(), entry)
+    assert sensor.device_class == BinarySensorDeviceClass.MOTION
 
 
 def test_rf_remote_buttons_get_a_press_event_but_the_battery_does_not(export) -> None:

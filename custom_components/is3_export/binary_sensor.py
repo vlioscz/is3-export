@@ -21,6 +21,7 @@ from .export import (
     ALERT,
     PLATFORM_BINARY_SENSOR,
     Is3Entry,
+    detector_binary_class,
     is_battery_input,
     is_press_button,
     platform_of,
@@ -57,6 +58,8 @@ class Is3BinarySensor(Is3Entity, BinarySensorEntity):
         elif (entry.space, entry.data_type) in ALERT:
             self._attr_device_class = BinarySensorDeviceClass.PROBLEM
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        elif (detector := detector_binary_class(entry)) is not None:
+            self._attr_device_class = BinarySensorDeviceClass(detector)
 
     @property
     def is_on(self) -> bool | None:

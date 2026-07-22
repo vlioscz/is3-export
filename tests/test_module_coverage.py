@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import pytest
 
-from custom_components.is3_export.export import Is3Entry, is_press_button, is_rf_button
+from custom_components.is3_export.export import (
+    Is3Entry,
+    detector_binary_class,
+    is_press_button,
+    is_rf_button,
+)
 
 DIN = 0x01010001  # a digital input
 
@@ -33,12 +38,28 @@ def test_wall_controller_keys_are_wired_buttons(model: str) -> None:
     assert not is_rf_button(entry), f"{model} is wired, so long-press capable"
 
 
-@pytest.mark.parametrize("model", ["RFKEY", "IBWL-20B"])
-def test_rf_sources_are_single_press_buttons(model: str) -> None:
-    """An RF remote and the RF input module are buttons, but single-press only."""
-    entry = _in(f"{model}_IN1_0A0002")
-    assert is_press_button(entry), model
-    assert is_rf_button(entry), f"{model} is RF, so no long-press"
+def test_rfkey_remote_is_a_single_press_button() -> None:
+    """An RFKEY key fob is all buttons, single-press only (release is lost)."""
+    entry = _in("RFKEY_IN1_0A0002")
+    assert is_press_button(entry)
+    assert is_rf_button(entry)
+
+
+def test_ibwl_rf_inputs_default_to_binary_sensors() -> None:
+    """An IBWL RF input mirrors whatever RF unit was paired (a button, but also a
+    door/motion contact), so it is a binary_sensor unless named a tlačítko."""
+    assert not is_press_button(_in("IBWL-20B_IN1_0A0003"))
+    named = _in("IBWL-20B_IN2_0A0004", name="TL_zvonek")
+    assert is_press_button(named)
+    assert is_rf_button(named), "a named IBWL button is still RF -> single press"
+
+
+def test_detector_modules_carry_a_presence_device_class() -> None:
+    """A motion/occupancy detector's input gets the matching device_class."""
+    assert detector_binary_class(_in("PMS3-01_Motion_0A0005")) == "motion"
+    assert detector_binary_class(_in("DMD3-1_Motion_0A0006")) == "motion"
+    assert detector_binary_class(_in("MCD3-01_Occ_0A0007")) == "occupancy"
+    assert detector_binary_class(_in("SA3-04M_IN1_0A0008")) is None
 
 
 def test_a_plain_modules_din_is_a_contact_not_a_button() -> None:

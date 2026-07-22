@@ -217,9 +217,12 @@ Tlačítka (Up/Down/DIN) jsou **`event` entita**. Drátové vypínače (WSB) roz
 Totéž rozpoznání platí pro **celou rodinu nástěnných ovladačů** — kromě `WSB3` i
 skleněné/dotykové `GSB3`, `GSP3`, `MSB3`, `GBP3`, `GRT3`, čtečky karet
 `GMR3`/`GCR3`/`GHR3`/`GCH3`, informační panely `GDB3`, `WMR3` a pokojový
-regulátor `IDRT3` (všechny drátové → `press`+`long_press`). RF zdroje jsou
-`RFKEY` a vstupní modul `IBWL` (jen `press`). Čidlo přiblížení a čtečka karty se
-jako tlačítka neberou.
+regulátor `IDRT3` (všechny drátové → `press`+`long_press`). **RFKEY** dálkový
+ovladač je celý tlačítka (jen `press`). **`IBWL`** (RF vstupní modul) je jiný —
+každý jeho vstup zrcadlí spárované RF zařízení (tlačítko, ale i dveřní/pohybové
+čidlo), což z exportu nepoznáme, takže je defaultně `binary_sensor`; ať je z
+konkrétního vstupu `press`, pojmenuj ho `TL_`. Čidlo přiblížení a čtečka karty
+se jako tlačítka neberou.
 
 **Jak short/long funguje:** rozlišení potřebuje dobu držení = mezeru mezi
 sepnutím (`=1`) a rozepnutím (`=0`). Na drátovém vypínači je tahle mezera čistá a

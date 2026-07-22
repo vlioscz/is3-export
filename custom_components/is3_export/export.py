@@ -289,8 +289,15 @@ _BUTTON_MODULE_PREFIXES = (
     "GMR", "GCR", "GHR", "GCH", "GDB", "WMR", "IDRT",
 )
 
-# RF button sources -- an RF remote (RFKEY) and the RF input module (IBWL).
-# Their release is dropped or delayed, so their buttons stay a single press.
+# Modules whose EVERY digital input is a button: the wired controllers above,
+# plus the RFKEY remote (a key fob is all buttons).  NOT IBWL -- an IBWL RF
+# input mirrors whatever RF unit was paired to it (a wall button, but equally a
+# door/motion/flood contact), which the export cannot tell apart, so an IBWL
+# input defaults to a binary_sensor and becomes a press only when named `TL_`.
+_AUTO_BUTTON_PREFIXES = _BUTTON_MODULE_PREFIXES + ("RFKEY",)
+
+# RF button sources -- an RFKEY remote and (when named as a button) an IBWL RF
+# input.  RF drops or delays the release, so their buttons stay a single press.
 _RF_BUTTON_PREFIXES = ("RFKEY", "IBWL")
 
 # A panel's proximity ("wake") sensor and its card/chip reader are digital
@@ -1000,12 +1007,12 @@ def _is_non_button_input(entry: Is3Entry) -> bool:
 def is_press_button(entry: Is3Entry) -> bool:
     """Whether the entry is a momentary button, reported as a press event.
 
-    On a wall/glass controller (WSB, GSB, MSB, ...) or an RF source (RFKEY,
-    IBWL), every digital input is a button -- bar a proximity/card input or a
-    remote's low-battery flag.  On any other module a digital input is a
-    maintained contact, a button only when the installer named it `TL_`
-    (tlačítko).  On the central unit's own In-Out terminals a bare `DIN` input
-    is a button too.
+    On a wall/glass controller (WSB, GSB, MSB, ...) or an RFKEY remote, every
+    digital input is a button -- bar a proximity/card input or a remote's
+    low-battery flag.  On any other module a digital input is a maintained
+    contact, a button only when the installer named it `TL_` (tlačítko) -- this
+    is also how a single IBWL RF input paired to a button is opted in.  On the
+    central unit's own In-Out terminals a bare `DIN` input is a button too.
     """
     if (
         _class_of(entry) not in BINARY
@@ -1015,7 +1022,7 @@ def is_press_button(entry: Is3Entry) -> bool:
         return False
     module = module_of(entry)
     if module is not None:
-        if module[0].startswith(_BUTTON_MODULE_PREFIXES + _RF_BUTTON_PREFIXES):
+        if module[0].startswith(_AUTO_BUTTON_PREFIXES):
             return True
         # Any other module's digital input is a maintained contact, not a
         # button, unless the installer explicitly named it a tlačítko.
@@ -1035,6 +1042,26 @@ def is_rf_button(entry: Is3Entry) -> bool:
     """
     module = module_of(entry)
     return module is not None and module[0].startswith(_RF_BUTTON_PREFIXES)
+
+
+# Built-in motion / occupancy detector modules: their digital input is the
+# detector bit.  A device_class only sharpens the icon and lets HA presence
+# automations use it -- it changes no platform.  (Verified against the
+# reference decoder: PMS3/DMD3 -> motion, MCD3 -> occupancy.)
+_MOTION_MODULES = ("PMS3", "DMD3")
+_OCCUPANCY_MODULES = ("MCD3",)
+
+
+def detector_binary_class(entry: Is3Entry) -> str | None:
+    """``motion``/``occupancy`` for a detector module's input, else None."""
+    module = module_of(entry)
+    if module is None:
+        return None
+    if module[0].startswith(_MOTION_MODULES):
+        return "motion"
+    if module[0].startswith(_OCCUPANCY_MODULES):
+        return "occupancy"
+    return None
 
 
 def is_battery_input(entry: Is3Entry) -> bool:
