@@ -4,355 +4,374 @@
 
 [![hacs][hacs-badge]][hacs] [![Validate](https://github.com/vlioscz/is3-export/actions/workflows/validate.yaml/badge.svg)](https://github.com/vlioscz/is3-export/actions/workflows/validate.yaml)
 
-NEOFFICIÁLNÍ Home Assistant integrace pro **centrální jednotky iNELS** (ELKO EP) přes jejich
-ASCII rozhraní — především starší **CU3-01M** a **CU3-02M**. Komunikuje s
-jednotkou přímo, **nepotřebuje Connection Server**.
+**English** · [Česky](README.cs.md)
 
-> „IS3" v názvu je **iNELS3** — formát exportu `.is3`, ze kterého integrace
-> vychází.
+UNOFFICIAL Home Assistant integration for **iNELS central units** (ELKO EP) over their
+ASCII interface — primarily the older **CU3-01M** and **CU3-02M**. It talks to the
+unit directly and **needs no Connection Server**.
 
-Seznam zařízení si stáhne z exportu, který jednotka sama servíruje. Stav
-sleduje živě: jednotka posílá změny sama, takže se nic nepolluje.
+> The "IS3" in the name is **iNELS3** — the `.is3` export format the integration
+> is based on.
 
-> **Stav: experimentální.** Protokol je ověřený proti živé jednotce, parser
-> proti exportům ze sedmi instalací (17 až 1125 položek, IDM3 03-03-34 až
-> 03-05-03). Neověřené zůstávají žaluzie na reálném pohonu — viz
-> [Omezení](#omezení).
+It downloads the device list from the export the unit serves itself. It tracks
+state live: the unit pushes changes on its own, so nothing is polled.
 
-## ❗ Nejdřív povol protokol v IDM3
+> **Status: experimental.** The protocol is verified against a live unit, the
+> parser against exports from seven installations (17 to 1125 items, IDM3
+> 03-03-34 through 03-05-03). Blinds on a real drive remain unverified — see
+> [Limitations](#limitations).
 
-Bez tohohle nefunguje nic — jednotka na ASCII portu neposlouchá.
+## ❗ First enable the protocol in IDM3
 
-V **iNELS IDM3** → *Konfigurace centrální jednotky* → **Third part setting**:
+Without this nothing works — the unit isn't listening on the ASCII port.
 
-| Položka | Co s ní |
+In **iNELS IDM3** → *Central unit configuration* → **Third part setting**:
+
+| Item | What to do |
 | --- | --- |
-| **Port** | Zvol volný port. Žádný výchozí neexistuje, poznamenej si ho. |
-| **Oddělovač** | Musí souhlasit s nastavením integrace. `[32]` je mezera. |
-| **Číselná soustava** | Musí souhlasit s nastavením integrace. |
-| **Režim** | Vzdálenné ovládání + IDM |
+| **Port** | Pick a free port. There's no default, so write it down. |
+| **Separator** | Must match the integration's setting. `[32]` is a space. |
+| **Number base** | Must match the integration's setting. |
+| **Mode** | Remote control + IDM |
 
-Napravo zaškrtej **události, které má jednotka posílat**. Co nezaškrtneš, to se
-integrace nikdy nedozví a entita zůstane viset na poslední hodnotě:
+On the right, tick the **events the unit should send**. Whatever you don't tick,
+the integration will never learn about, and the entity stays stuck at its last
+value:
 
-- `Digital_OUT_SwitchOn` / `SwitchOff` — relé (bez nich nepoznáš cvaknutí vypínačem)
-- `Analog_OUT_ValueChanged`, `Analog_OUT_SwitchOn` / `SwitchOff` — stmívače
-- `Analog_IN_ValueChange`, `Sensor_Change` — teploty, vlhkosti, analogové vstupy
-- `Digital_IN_SwitchOn` / `SwitchOff` — vstupy a tlačítka
-- `SysInt_Change`, `Program_ValueSwitchOn` / `Off` — systémové proměnné
+- `Digital_OUT_SwitchOn` / `SwitchOff` — relays (without them you won't catch a switch flip)
+- `Analog_OUT_ValueChanged`, `Analog_OUT_SwitchOn` / `SwitchOff` — dimmers
+- `Analog_IN_ValueChange`, `Sensor_Change` — temperatures, humidities, analog inputs
+- `Digital_IN_SwitchOn` / `SwitchOff` — inputs and buttons
+- `SysInt_Change`, `Program_ValueSwitchOn` / `Off` — system variables
 
-Nakonec **Uložit do CU**.
+Finally, **Save to CU**.
 
-Na těchhle zaškrtávátkách závisí, jak rychle se stav objeví v Home Assistantu.
-Jednotku ovládají i vypínače na zdech, takže změna nemusí přijít z HA — a pozná
-ji jen z události. **Co má vlastní událost, aktualizuje se řádově do sekundy;
-co ne, až při pravidelném dočítání (30 s).** To kolísání u změn ze zdi
-(hned vs. 2–3 s) je zpoždění samotné jednotky, než změnu na ASCII odešle, ne
-integrace.
+How fast state shows up in Home Assistant depends on these checkboxes. The unit
+is also driven by switches on the walls, so a change need not come from HA — and
+it's only detected from an event. **What has its own event updates within a
+second or so; what doesn't, only on the periodic re-read (30 s).** The
+variability with changes from the wall (instant vs. 2–3 s) is the unit's own
+delay before it sends the change over ASCII, not the integration's.
 
-Vlastní příkazy z HA se zobrazí okamžitě a integrace je pak **ověří zpětným
-čtením** — když se výstup neuchytil nebo ho mezitím přehodil vypínač na zdi,
-oprav se stav na skutečnost místo aby ikona zůstala viset ve špatném stavu.
+Commands from HA itself show up immediately, and the integration then **verifies
+them by reading back** — if the output didn't take, or a switch on the wall
+flipped it in the meantime, the state corrects itself to reality instead of
+leaving the icon stuck in the wrong state.
 
-## Instalace
+## Installation
 
-[![Přidat repozitář do HACS][hacs-badge-btn]][hacs-add]
+[![Add repository to HACS][hacs-badge-btn]][hacs-add]
 
-Pak **Download**, restart Home Assistanta a:
+Then **Download**, restart Home Assistant, and:
 
-[![Přidat integraci][config-badge]][config-add]
+[![Add integration][config-badge]][config-add]
 
-Ručně: zkopíruj `custom_components/is3_export` do `config/custom_components/`.
+Manually: copy `custom_components/is3_export` into `config/custom_components/`.
 
-## Nastavení
+## Configuration
 
-| Pole | Popis | Výchozí |
+| Field | Description | Default |
 | --- | --- | --- |
-| Host | IP adresa jednotky | — |
-| ASCII port | **z IDM3** | `22272` |
-| Export file path | nech prázdné, stáhne se z jednotky | prázdné |
-| Oddělovač | **z IDM3**, nabízí všech 27 možností | mezera `[32]` |
-| Číselná soustava | **z IDM3** | hexadecimální |
+| Host | The unit's IP address | — |
+| ASCII port | **from IDM3** | `22272` |
+| Export file path | leave empty, it downloads from the unit | empty |
+| Separator | **from IDM3**, offers all 27 options | space `[32]` |
+| Number base | **from IDM3** | hexadecimal |
 
-Název integrace se vezme z hlavičky exportu.
+The integration's name is taken from the export header.
 
-**Heslo se nezadává.** Export servíruje webserver jednotky jako statický soubor
-bez přihlášení, takže **heslo projektu iNELS na jeho dostupnost nemá vliv**.
-(Kdyby přesto nějaká jednotka stažení blokovala, zadej cestu k lokálně
-staženému exportu.)
+**No password is entered.** The unit's web server serves the export as a static
+file with no login, so **the iNELS project password has no effect on its
+availability**. (If some unit blocks the download anyway, enter the path to a
+locally downloaded export.)
 
-Když entity hlásí *odhadovaný stav*, sedí ti špatně **oddělovač**.
+If entities report an *estimated state*, your **separator** is wrong.
 
-## Které adresy se stanou entitami
+## Which addresses become entities
 
-Druhý bajt adresy určuje typ:
+The second byte of the address determines the type:
 
-| Adresa | Význam | Entita | Zápis |
+| Address | Meaning | Entity | Write |
 | --- | --- | --- | --- |
-| `0x01`**`02`** | relé | `switch` | ✅ |
-| `0x01`**`04`** | stmívač (s jednotkou `%`) | `light` 0–100 % | ✅ |
+| `0x01`**`02`** | relay | `switch` | ✅ |
+| `0x01`**`04`** | dimmer (with `%` unit) | `light` 0–100 % | ✅ |
 | `0x02`**`03`** | SYSTEMBIT | `switch` | ✅ |
 | `0x02`**`02`** | SYSTEMINTEGER | `number` | ✅ |
-| dvojice adres | žaluzie | `cover` | ✅ |
-| kanály regulátoru | topná zóna | `climate` | ✅ |
-| `0x01`**`01`** | vstupy, tlačítka, stavové výstupy regulátoru | `binary_sensor` | ❌ |
-| `0x01`**`07`** | poruchy modulů | `binary_sensor` (problem) | ❌ |
-| `0x01`**`05`** | teplota / vlhkost | `sensor` | ❌ |
-| `0x01`**`08`** | analogový vstup | `sensor` | ❌ |
-| `0x01`**`03`**, `0x01`**`11`**, `0x01`**`12`** | kanály regulátorů | `sensor` | ❌ |
-| `0x02`**`06`** | vodoměry, elektroměry | `sensor` (total) | ❌ |
-| `0x05`**`01`**, `0x02`**`04`**, `0x02`**`09`**, `0x0003` | plány, skupiny, rozvrhy | — | ❌ |
+| address pair | blind | `cover` | ✅ |
+| controller channels | heating zone | `climate` | ✅ |
+| `0x01`**`01`** | inputs, buttons, controller status outputs | `binary_sensor` | ❌ |
+| `0x01`**`07`** | module faults | `binary_sensor` (problem) | ❌ |
+| `0x01`**`05`** | temperature / humidity | `sensor` | ❌ |
+| `0x01`**`08`** | analog input | `sensor` | ❌ |
+| `0x01`**`03`**, `0x01`**`11`**, `0x01`**`12`** | controller channels | `sensor` | ❌ |
+| `0x02`**`06`** | water meters, electricity meters | `sensor` (total) | ❌ |
+| `0x05`**`01`**, `0x02`**`04`**, `0x02`**`09`**, `0x0003` | plans, groups, schedules | — | ❌ |
 
-Zapisuje se **jen tam, kde je zápis doložený**. Do vstupů, termostatických
-kanálů ani plánů nikdy.
+Writes happen **only where a write is documented**. Never to inputs, thermostat
+channels, or plans.
 
-Rozhoduje **hardwarové ID**, ne jméno: co začíná na `Controller_`, je vnitřnost
-regulátoru a nezapisuje se do toho — okenní čidlo sedí ve stejném rozsahu jako
-relé. Naopak nepojmenované relé (`_ SA3-04M_RE2_…`) je pořád relé.
+The **hardware ID** decides, not the name: anything starting with `Controller_`
+is controller internals and is not written to — a window sensor sits in the same
+range as a relay. Conversely, an unnamed relay (`_ SA3-04M_RE2_…`) is still a
+relay.
 
-### Názvy zpřesňují typ entity
+### Names refine the entity type
 
-Adresa říká, čím výstup je; jméno říká, k čemu slouží. Impulz a lampa jsou
-z pohledu adresy totéž.
+The address says what the output is; the name says what it's for. A pulse and a
+lamp are the same as far as the address is concerned.
 
-| V názvu | Entita | Ikona |
+| In the name | Entity | Icon |
 | --- | --- | --- |
 | `imp` | `button` | — |
-| `sv` | `light` | žárovka |
-| `lamp` | `light` | stojací lampa |
-| `zrc` | `light` | zrcadlo |
-| `LED` | `light` | LED pásek |
-| `vent` | `switch` | ventilátor |
-| `zas` | `switch` | zásuvka |
-| `TL` (nebo `DIN` vstup) | `event` (`press` + `long_press`) | — |
+| `sv` | `light` | light bulb |
+| `lamp` | `light` | floor lamp |
+| `zrc` | `light` | mirror |
+| `LED` | `light` | LED strip |
+| `vent` | `switch` | fan |
+| `zas` | `switch` | socket |
+| `TL` (or `DIN` input) | `event` (`press` + `long_press`) | — |
 
-`sv`, `imp`, `vent`, `zas` a `TL` musí sedět jako celý token (jinak by
-`Svod_vody` bylo světlo a `Zastineni` zásuvka), `lamp`, `zrc` a `LED` stačí jako
-předpona.
+`sv`, `imp`, `vent`, `zas`, and `TL` must match as a whole token (otherwise
+`Svod_vody` would be a light and `Zastineni` a socket); `lamp`, `zrc`, and `LED`
+are enough as a prefix.
 
-**`TL_`** (tlačítko) udělá `event` tlačítko na **jakémkoli** modulu. **`DIN`**
-vstup je tlačítko na **nástěnných ovladačích** a na **samotné centrální
-jednotce** (In-Out); na ostatních modulech (např. vstupní modul `IM3`) je `DIN`
-běžný `binary_sensor` (udržovaný kontakt), dokud ho nepojmenuješ `TL_`. Drátové
-tlačítko rozlišuje `press` i `long_press` (viz
-[Nástěnné vypínače](#nástěnné-vypínače-wsb)).
+**`TL_`** (button) makes an `event` button on **any** module. A **`DIN`** input
+is a button on **wall controllers** and on the **central unit itself** (In-Out);
+on other modules (e.g. the `IM3` input module) `DIN` is a plain `binary_sensor`
+(a maintained contact) until you name it `TL_`. A wired button distinguishes
+both `press` and `long_press` (see [Wall switches](#wall-switches-wsb3)).
 
-Tlačítko (`imp`) při stisku pošle **puls** — bit na `1` a hned zpět na `0`.
-Klidový stav je vždy `0`, takže každý další stisk je zase čistá náběžná hrana,
-na kterou iNELS program zareaguje. (Držet `1` by zabralo jen jednou, jednotka
-si bit sama nenuluje.)
-Dělí se na `_` a `-`, na velikosti písmen nezáleží. Konkrétnější vyhrává:
-`imp_sv_chodba` je tlačítko.
+A button (`imp`) sends a **pulse** on press — the bit to `1` and straight back
+to `0`. The idle state is always `0`, so every next press is again a clean
+rising edge that the iNELS program reacts to. (Holding `1` would work only once;
+the unit doesn't zero the bit itself.)
+It splits on `_` and `-`, and case doesn't matter. The more specific one wins:
+`imp_sv_chodba` is a button.
 
-Světelné a spínací konvence (`sv`, `lamp`, `zrc`, `LED`, `vent`, `imp`) platí
-**jen pro fyzická relé/stmívače** a nikdy z ničeho neudělají zapisovatelnou
-entitu — vstup pojmenovaný `Sv_okno` zůstane `binary_sensor`, systémový bit
-`blok_noc_lamp` zůstane spínačem. Naopak `TL`/`DIN` platí **jen pro digitální
-vstupy** (z relé tlačítko neudělají).
+The light and switch conventions (`sv`, `lamp`, `zrc`, `LED`, `vent`, `imp`)
+apply **only to physical relays/dimmers** and never turn anything into a
+writable entity — an input named `Sv_okno` stays a `binary_sensor`, and the
+system bit `blok_noc_lamp` stays a switch. Conversely, `TL`/`DIN` apply **only
+to digital inputs** (they won't make a button out of a relay).
 
-Víc pravidel záměrně není. Když ti něco vyjde jinak, přepiš typ entity nebo
-ikonu ručně v Home Assistantu.
+There are deliberately no more rules. If something comes out differently,
+override the entity type or icon manually in Home Assistant.
 
-### Žaluzie
+### Blinds
 
-Skládají se z několika adres do jedné entity `cover`, ze dvou možných zdrojů:
+They combine several addresses into one `cover` entity, from two possible
+sources:
 
-1. **Systémové bity programu žaluzií** — nahoru, dolů, stop, naklápění. Program
-   v jednotce si řídí kontakty sám. Má přednost.
-2. **Dvojice relé JA3** — jen nahoru a dolů, stop uvolněním obou. Použije se,
-   jen když program v exportu není.
+1. **System bits of the blind program** — up, down, stop, tilt. The program in
+   the unit drives the contacts itself. It takes priority.
+2. **A pair of JA3 relays** — only up and down, stop by releasing both. Used
+   only when there's no program in the export.
 
-Adresy, které si vezme žaluzie, už nevzniknou jako spínače.
+Addresses taken by a blind no longer appear as switches.
 
-### Topné zóny
+### Heating zones
 
-Regulátor topení je sada kanálů se stejnou sériovou příponou plus pojmenovaný
-kořen `<název> Controller_<sériové>`. Z nich vznikne jedna entita `climate`:
+A heating controller is a set of channels with the same serial suffix plus a
+named root `<name> Controller_<serial>`. Together they form one `climate` entity:
 
-| | Kanál |
+| | Channel |
 | --- | --- |
-| aktuální teplota | `Actual-Therm-AOUT` |
-| požadovaná teplota | `Required-Therm-AOUT` (topení) / `Required-Cool-Therm-AOUT` (chlazení) |
-| topí / chladí | `Required-Heat-DOUT` / `Required-Cool-DOUT` |
-| předvolba | `Control-Manual-IN` — 0 Schedule, 1–4 Preset 1–4, **7 Manual** |
-| topení / chlazení | `Control-HC-IN` — 0 topení, 1 chlazení |
-| zapnuto / vypnuto | `Control-IN` — 0 vyp, 1 zap |
+| current temperature | `Actual-Therm-AOUT` |
+| target temperature | `Required-Therm-AOUT` (heating) / `Required-Cool-Therm-AOUT` (cooling) |
+| heats / cools | `Required-Heat-DOUT` / `Required-Cool-DOUT` |
+| preset | `Control-Manual-IN` — 0 Schedule, 1–4 Preset 1–4, **7 Manual** |
+| heating / cooling | `Control-HC-IN` — 0 heating, 1 cooling |
+| on / off | `Control-IN` — 0 off, 1 on |
 
-Režim **Cool** se u zóny nabídne **jen když má reálně zapojený chladicí výstup**.
-Chladicí kanály (`Control-HC-IN`, `Required-Cool-*`) totiž nese *každá* zóna, takže
-jejich přítomnost nestačí — schopnost pozná až kořenový řádek regulátoru: topná
-zóna má flags `0x05` s prázdnými chladicími sloty plánu, zóna s chlazením `0x3F`
-s vyplněnými (ověřeno na jednotce). Kde je Cool k dispozici, přepíná se přes
-`Control-HC-IN` a chlazení má vlastní setpointy: `Required-Cool-Therm-AOUT`
-(v platnosti) a `Manual-Cool-Therm-AIN` (manuální).
+The **Cool** mode is offered for a zone **only when it actually has a cooling
+output wired**. The cooling channels (`Control-HC-IN`, `Required-Cool-*`) are
+carried by *every* zone, so their presence isn't enough — the capability is only
+recognized from the controller's root row: a heating zone has flags `0x05` with
+empty cooling schedule slots, a zone with cooling `0x3F` with filled ones
+(verified on the unit). Where Cool is available, it's switched via
+`Control-HC-IN`, and cooling has its own setpoints: `Required-Cool-Therm-AOUT`
+(in effect) and `Manual-Cool-Therm-AIN` (manual).
 
-Nastavení teploty přepne zónu do Manualu a zapíše `Manual-Therm-AIN` (topení),
-resp. `Manual-Cool-Therm-AIN` (chlazení). Hodnoty předvoleb 1–4 i týdenní plán
-za Schedule (`HEATCOOL_WEEK`) se nastavují v jednotce.
+Setting the temperature switches the zone into Manual and writes
+`Manual-Therm-AIN` (heating), or `Manual-Cool-Therm-AIN` (cooling). Preset
+values 1–4 and the weekly plan behind Schedule (`HEATCOOL_WEEK`) are set on the
+unit.
 
-Pozor na jedno úskalí (ošetřené): zápis setpointu **hned** po přepnutí do
-Manualu ho zkorumpuje — hodnota spadne pod mrazovou ochranu (~0,1 °C) a s ní
-i topné relé, zóna přestane topit. Proto integrace po přepnutí **počká**, pak
-setpoint zapíše a **ověří zpětným čtením**, případně zápis zopakuje. Manual je
-hodnota **7**, ne 5 — pětka shodí zónu na mrazovou ochranu.
+Watch out for one pitfall (handled): writing the setpoint **immediately** after
+switching into Manual corrupts it — the value drops below frost protection
+(~0.1 °C), and the heating relay with it, and the zone stops heating. So after
+switching, the integration **waits**, then writes the setpoint and **verifies it
+by reading back**, repeating the write if needed. Manual is value **7**, not 5 —
+a five drops the zone to frost protection.
 
-Každá zóna má navíc `select` **plán** — Běžný / Prázdninový / Sváteční
-(`Control-Plan-IN` 0 / 64 / 128, vše ověřeno na živé jednotce). Sváteční je
-**denní** program (`HEATCOOL_DAY`) a musí být v jednotce nakonfigurovaný; kde
-není, přepnutí se neuchytí a zpětné čtení plán v UI srovná zpět.
+Each zone also has a `select` **plan** — Normal / Vacation / Holiday
+(`Control-Plan-IN` 0 / 64 / 128, all verified on a live unit). Holiday is a
+**daily** program (`HEATCOOL_DAY`) and must be configured on the unit; where it
+isn't, the switch doesn't take and the read-back squares the plan back in the UI.
 
-### Nástěnné vypínače (WSB3)
+### Wall switches (WSB3)
 
-Jeden vypínač se rozpadne na entitu za každý kanál — nic se nespeciálně-neřeší,
-vyplyne to z typu adresy:
+A single switch breaks down into one entity per channel — nothing is
+special-cased, it follows from the address type:
 
-| Typ | Rozpad na entity |
+| Type | Breakdown into entities |
 | --- | --- |
-| **WSB3-20** | 8 — 2 tlačítka (nahoru/dolů) + 2 LED (zelená/červená) + 2 teploty + 2 dig. vstupy |
-| **WSB3-40** | 12 — 4 tlačítka + 4 LED + 2 teploty + 2 dig. vstupy |
-| **WSB3-*-Hum** | +2 — vlhkost (`%`, `device_class humidity`) a rosný bod (°C) |
+| **WSB3-20** | 8 — 2 buttons (up/down) + 2 LEDs (green/red) + 2 temperatures + 2 digital inputs |
+| **WSB3-40** | 12 — 4 buttons + 4 LEDs + 2 temperatures + 2 digital inputs |
+| **WSB3-*-Hum** | +2 — humidity (`%`, `device_class humidity`) and dew point (°C) |
 
-Indikační **LED** (role `Green`/`Red`) jsou spínače s ikonou **G**/**R** —
-pozná se to z role, takže i nepojmenované (`_`) je dostanou.
+The indicator **LEDs** (roles `Green`/`Red`) are switches with a **G**/**R**
+icon — it's recognized from the role, so even unnamed ones (`_`) get it.
 
-Tlačítka (Up/Down/DIN) jsou **`event` entita**. Drátové vypínače (WSB) rozlišují
-**krátký `press` a `long_press`**; tlačítka **RF ovladače** hlásí jen `press`.
+Buttons (Up/Down/DIN) are an **`event` entity**. Wired switches (WSB) distinguish
+a **short `press` and `long_press`**; the buttons of an **RF controller** report
+only `press`.
 
-Totéž rozpoznání platí pro **celou rodinu nástěnných ovladačů** — kromě `WSB3` i
-skleněné/dotykové `GSB3`, `GSP3`, `MSB3`, `GBP3`, `GRT3`, čtečky karet
-`GMR3`/`GCR3`/`GHR3`/`GCH3`, informační panely `GDB3`, `WMR3` a pokojový
-regulátor `IDRT3` (všechny drátové → `press`+`long_press`). **RFKEY** dálkový
-ovladač je celý tlačítka (jen `press`). **`IBWL`** (RF vstupní modul) je jiný —
-každý jeho vstup zrcadlí spárované RF zařízení (tlačítko, ale i dveřní/pohybové
-čidlo), což z exportu nepoznáme, takže je defaultně `binary_sensor`; ať je z
-konkrétního vstupu `press`, pojmenuj ho `TL_`. Čidlo přiblížení a čtečka karty
-se jako tlačítka neberou.
+The same recognition applies to the **whole family of wall controllers** —
+besides `WSB3`, also the glass/touch `GSB3`, `GSP3`, `MSB3`, `GBP3`, `GRT3`, the
+card readers `GMR3`/`GCR3`/`GHR3`/`GCH3`, the info panels `GDB3`, `WMR3`, and the
+room controller `IDRT3` (all wired → `press`+`long_press`). The **RFKEY** remote
+is all buttons (only `press`). **`IBWL`** (RF input module) is different — each
+of its inputs mirrors a paired RF device (a button, but also a door/motion
+sensor), which we can't tell from the export, so it's a `binary_sensor` by
+default; to make a particular input a `press`, name it `TL_`. A proximity sensor
+and a card reader are not treated as buttons.
 
-**Jak short/long funguje:** rozlišení potřebuje dobu držení = mezeru mezi
-sepnutím (`=1`) a rozepnutím (`=0`). Na drátovém vypínači je tahle mezera čistá a
-konzistentní — ťuknutí padnou pod ~100 ms, záměrná držení nad ~1,5 s, s širokou
-prázdnou mezerou mezi tím. Integrace proto na sepnutí spustí časovač: přijde-li
-dřív rozepnutí, je to krátký `press`; když časovač (**1,5 s**, stejně jako
-long-press v iNELS) doběhne a tlačítko je **pořád držené**, je to `long_press` —
-vystřelí **hned v tom okamžiku, nečeká na puštění**, takže akce na dlouhý stisk
-naskočí včas. Ztracené rozepnutí tlačítko nezasekne — pojistný časovač uvolní.
+**How short/long works:** telling them apart needs the hold duration = the gap
+between the close (`=1`) and the open (`=0`). On a wired switch this gap is clean
+and consistent — taps fall under ~100 ms, deliberate holds over ~1.5 s, with a
+wide empty gap in between. So on the close the integration starts a timer: if
+the open arrives first, it's a short `press`; when the timer (**1.5 s**, the same
+as long-press in iNELS) runs out and the button is **still held**, it's a
+`long_press` — it fires **right at that moment, without waiting for release**, so
+the long-press action kicks in on time. A lost open won't stick the button — a
+safety timer releases it.
 
-> ⚠️ **Podmínka spolehlivého short/long: neběžící Connection Server.** Jeho
-> periodický sběr jednotku na pár sekund zmrazí a dobu držení rozmaže (viz sekci
-> **Connection Server zpomaluje odezvu** níže). Původně to kvůli tomu vypadalo
-> jako slepá ulička; v čistých podmínkách je timing spolehlivý.
+> ⚠️ **A condition for reliable short/long: no running Connection Server.** Its
+> periodic polling freezes the unit for a few seconds and smears the hold
+> duration (see the **Connection Server slows the response** section below). That
+> originally made this look like a dead end; under clean conditions the timing is
+> reliable.
 
-**RF ovladače zůstávají jen na `press`** — jejich rozepnutí se ztrácí příliš
-často, doba držení tam spolehlivá není. `press` se u nich vystřelí na **každou
-událost sepnutí**; tlačítka se přitom **nededupují** (integrace normálně probudí
-entitu jen při změně hodnoty), aby ztracené rozepnutí neschovalo další stisk —
-jinak by byl další stisk „beze změny" a zahodil by se (odtud dřívější „musím
-3×"). Krátký debounce (~0,5 s) spolkne jen okamžité dvojposlání téhož stisku.
+**RF controllers stay on `press` only** — their open is lost too often, and the
+hold duration there isn't reliable. For them `press` fires on **every close
+event**; buttons are meanwhile **not deduplicated** (the integration normally
+wakes an entity only on a value change) so that a lost open doesn't hide the next
+press — otherwise the next press would be "no change" and get discarded (hence
+the earlier "I have to press 3×"). A short debounce (~0.5 s) swallows only an
+immediate double-send of the same press.
 
-> Senzory se naopak **utlumují** (max ~1 notifikace/s), aby ukecaný analogový
-> vstup CU nezahltil smyčku — hodnota se ukládá dál, jen se stav nezapisuje
-> pořád. Tím zůstává zpracování tlačítek svižné.
+> Sensors, by contrast, are **throttled** (max ~1 notification/s) so that a
+> chatty analog input of the CU doesn't flood the loop — the value keeps being
+> stored, only the state isn't written constantly. This keeps button handling
+> snappy.
 
-Stav baterie RF ovladače je běžný `binary_sensor` (battery), ne tlačítko.
+The RF controller's battery status is a plain `binary_sensor` (battery), not a
+button.
 
-### Rozdělení na zařízení
+### Split into devices
 
-Každý **fyzický modul** (podle sériového čísla v hardwarovém ID) je v HA
-**vlastní zařízení** vnořené pod centrální jednotku. Kanály jednoho vypínače,
-relé desky nebo stmívače tak drží pohromadě — poznáš, který `Green1` patří ke
-kterému vypínači. Systémové věci (bity, integery, tlačítka) modul nemají a
-zůstávají přímo na centrální jednotce.
+Every **physical module** (by the serial number in the hardware ID) is its **own
+device** in HA, nested under the central unit. So the channels of one switch,
+relay board, or dimmer stay together — you can tell which `Green1` belongs to
+which switch. System things (bits, integers, buttons) have no module and remain
+directly on the central unit.
 
-### Skryté ve výchozím stavu
+### Hidden by default
 
-Velké instalace exportují stovky vnitřností panelů — kontakty tlačítek,
-indikační LEDky, poruchové příznaky. Entity z nich vzniknou, ale jsou
-**ve výchozím stavu vypnuté**. Zapneš je v nastavení integrace. Nepojmenované
-dostanou název z role v hardwarovém ID (např. `Up`, `Green`), ne z celého ID.
+Large installations export hundreds of panel internals — button contacts,
+indicator LEDs, fault flags. Entities are created from them, but they are
+**disabled by default**. You enable them in the integration settings. Unnamed
+ones get their name from the role in the hardware ID (e.g. `Up`, `Green`), not
+from the whole ID.
 
-Vypnuté jsou i **`SW` stavové vstupy** relé a **poruchové/alert příznaky**
-(`OUF-Alert`, typ `0x0107`) — a to **i když jsou pojmenované**, protože je
-sleduje málokdo. Alert má `device_class problem` a je diagnostický.
+Also disabled are the **`SW` status inputs** of relays and the **fault/alert
+flags** (`OUF-Alert`, type `0x0107`) — **even when they're named**, because
+hardly anyone watches them. An alert has `device_class problem` and is
+diagnostic.
 
-### RF zařízení
+### RF devices
 
-Zařízení na RF modulu (např. `RFKEY` — dálkové ovladače) se objeví jako vlastní
-zařízení s tlačítky (`binary_sensor`) a stav baterie `Battery_LOW` dostane
+A device on an RF module (e.g. `RFKEY` — remotes) appears as its own device with
+buttons (`binary_sensor`), and the `Battery_LOW` battery status gets
 `device_class battery`.
 
-### Co je v exportu
+### What's in the export
 
-Export **není** seznam všeho — v IDM3 se vybírá, co se do něj zahrne. Chybí-li
-ti něco v Home Assistantu, přidej to tam. Integrace kontroluje jednou za
-30 minut, jestli se seznam změnil, a sama se přenačte. Hned to udělá **Reload**.
+The export is **not** a list of everything — in IDM3 you choose what goes into
+it. If something's missing in Home Assistant, add it there. The integration
+checks once every 30 minutes whether the list has changed and reloads itself.
+**Reload** does it immediately.
 
-### Hodnoty
+### Values
 
-Teploty a vlhkosti chodí **vynásobené stem** — 2550 znamená 25,50 °C. Stmívače
-jsou rovnou v procentech. `SYSTEMINTEGER` je **syrová hodnota**, která se nijak
-nepřepočítává; co znamená, určuje program, který ji používá.
+Temperatures and humidities come in **multiplied by a hundred** — 2550 means
+25.50 °C. Dimmers are already in percent. `SYSTEMINTEGER` is a **raw value** that
+isn't converted in any way; what it means is up to the program that uses it.
 
-## ⚠️ Bezpečnost
+## ⚠️ Security
 
-**ASCII port nemá žádnou autentizaci** — a heslo na jednotce to nezmění, to
-chrání jen webserver. Kdokoliv, kdo se dostane na ten TCP port, může ovládat
-celou instalaci.
+**The ASCII port has no authentication** — and the password on the unit won't
+change that; it only protects the web server. Anyone who reaches that TCP port
+can control the entire installation.
 
-Drž jednotku v oddělené VLAN nebo ji aspoň odděl firewallem od nedůvěryhodných
-zařízení a od internetu.
+Keep the unit on a separate VLAN, or at least firewall it off from untrusted
+devices and from the internet.
 
-## Omezení
+## Limitations
 
-- **Žaluzie nejsou ověřené na reálném pohonu.** U relé varianty se předpokládá,
-  že `1` motor rozjede a `0` zastaví; pauza při obracení chodu je odhad.
-- **Scény se nedají spouštět** — `GET` na ně vrací `N`, zápis neověřený.
-- **Binární formáty `.otc` / `.cld` se nečtou.** Obsahují navíc pojmenované scény.
-- **HTTP i ASCII port jdou bez šifrování.**
+- **Blinds are not verified on a real drive.** For the relay variant, it's
+  assumed that `1` starts the motor and `0` stops it; the pause when reversing
+  direction is a guess.
+- **Scenes can't be triggered** — a `GET` on them returns `N`, and writing is unverified.
+- **The binary `.otc` / `.cld` formats are not read.** They additionally contain named scenes.
+- **Both the HTTP and ASCII ports run without encryption.**
 
-## ⚠️ Connection Server zpomaluje odezvu
+## ⚠️ Connection Server slows the response
 
-Pokud tutéž centrální jednotku obsluhuje i **iNELS Connection Server**, počítej
-s občasnou prodlevou. Connection Server si zhruba **každých 40–60 s** sáhne na
-jednotku pro kompletní stav a jednotka při tom na **~2–4 s zamrzne celý ASCII
-výstup** — přestane posílat události i vykonávat příkazy. Do tohoto okna tu a tam
-spadne stisk nebo přepnutí, které pak reaguje o ty 2–4 s později — a to **pro
-všechny klienty naráz**, tedy i pro samotný Connection Server (zpožďuje tak i
-sám sebe).
+If the same central unit is also served by the **iNELS Connection Server**,
+expect an occasional delay. The Connection Server reaches into the unit for the
+complete state roughly **every 40–60 s**, and during that the unit **freezes the
+entire ASCII output for ~2–4 s** — it stops sending events and stops executing
+commands. Every so often a press or a toggle falls into this window and then
+reacts those 2–4 s later — and that **for all clients at once**, including the
+Connection Server itself (so it delays even itself).
 
-- **Nepotřebuješ-li Connection Server, vypni ho** — odezva integrace je pak
-  plynulá (jednotka odpovídá ~180 ms).
-- **Potřebuješ-li ho**, zpomal/odlehči v jeho konfiguraci ten periodický sběr
-  stavů (jak často a kolik toho z jednotky čte).
+- **If you don't need the Connection Server, turn it off** — the integration's
+  response is then smooth (the unit answers in ~180 ms).
+- **If you do need it**, slow down / lighten the periodic state polling in its
+  configuration (how often and how much it reads from the unit).
 
-Ověřeno izolačně: integrace sama žádné zamrzání nezpůsobuje — vzniká jen tehdy,
-když je připojený i Connection Server.
+Verified in isolation: the integration itself causes no freezing — it arises
+only when the Connection Server is also connected.
 
-> Nesouvisí s tím ani počet klientů: centrální jednotka má **omezený počet ASCII
-> spojení**. Nenechávej na port `22272` mířit spoustu klientů naráz — když se
-> sloty vyčerpají, jednotka spojení sice přijme, ale přestane obsluhovat (HTTP
-> export jede dál) a pomůže až restart CU.
+> The number of clients isn't related either: the central unit has a **limited
+> number of ASCII connections**. Don't point a lot of clients at port `22272` at
+> once — when the slots run out, the unit will accept the connection but stop
+> serving it (the HTTP export keeps running), and only a CU restart helps.
 
-## Diagnostika
+## Diagnostics
 
-Když něco nesedí, tenhle skript zjistí, co jednotka umí — je read-only, dokud
-nepřidáš `--write`:
+When something's off, this script finds out what the unit can do — it's
+read-only until you add `--write`:
 
 ```bash
 python tools/probe_is3.py <ip> <port> 0x0102000A
 ```
 
-## Vývoj
+## Development
 
 ```bash
 pip install -r requirements-test.txt
 pytest
 ```
 
-Jednotka mluví i jinými protokoly, se kterými integrace nepracuje: **ELKONET**
-(binární, port 9999) a **XML-RPC** na Connection Serveru (port 7801) — pro tu
-cestu existuje [InelsForHass](https://github.com/JH-Soft-Technology/InelsForHass).
+The unit also speaks other protocols the integration doesn't work with:
+**ELKONET** (binary, port 9999) and **XML-RPC** on the Connection Server
+(port 7801) — for that route there's
+[InelsForHass](https://github.com/JH-Soft-Technology/InelsForHass).
 
-## Licence
+## License
 
 [MIT](LICENSE)
 

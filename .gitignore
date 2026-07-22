@@ -13,5 +13,5 @@ htmlcov/
 .idea/
 .DS_Store
 
-# Stray/unrelated files that live in this folder but are not part of the repo.
-_bluesmoke_preview.html
+# Local scratch/preview files that are not part of this integration.
+*_preview.html
