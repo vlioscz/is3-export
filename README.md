@@ -121,11 +121,17 @@ z pohledu adresy totéž.
 | `sv` | `light` | žárovka |
 | `lamp` | `light` | stojací lampa |
 | `zrc` | `light` | zrcadlo |
+| `LED` | `light` | LED pásek |
 | `vent` | `switch` | ventilátor |
+| `TL` (nebo `DIN` vstup) | `event` (`press`) | — |
 
-`sv`, `imp` a `vent` musí sedět jako celý token (jinak by `Svod_vody` bylo
-světlo), `lamp` a `zrc` stačí jako předpona (protože zrcadlo se píše `zrc`
-i `zrcadlo`).
+`sv`, `imp`, `vent` a `TL` musí sedět jako celý token (jinak by `Svod_vody`
+bylo světlo), `lamp`, `zrc` a `LED` stačí jako předpona.
+
+**`TL_`** (tlačítko) a **`DIN`** vstupy jsou momentální tlačítka → `event`
+entita s typem `press` (viz [Nástěnné vypínače](#nástěnné-vypínače-wsb)). Platí
+i pro digitální vstupy **na samotné centrální jednotce** (In-Out), ne jen na
+vypínačích.
 
 Tlačítko (`imp`) při stisku pošle **puls** — bit na `1` a hned zpět na `0`.
 Klidový stav je vždy `0`, takže každý další stisk je zase čistá náběžná hrana,
@@ -134,9 +140,11 @@ si bit sama nenuluje.)
 Dělí se na `_` a `-`, na velikosti písmen nezáleží. Konkrétnější vyhrává:
 `imp_sv_chodba` je tlačítko.
 
-Konvence platí **jen pro fyzická relé** a nikdy z ničeho neudělají zapisovatelnou
+Světelné a spínací konvence (`sv`, `lamp`, `zrc`, `LED`, `vent`, `imp`) platí
+**jen pro fyzická relé/stmívače** a nikdy z ničeho neudělají zapisovatelnou
 entitu — vstup pojmenovaný `Sv_okno` zůstane `binary_sensor`, systémový bit
-`blok_noc_lamp` zůstane spínačem.
+`blok_noc_lamp` zůstane spínačem. Naopak `TL`/`DIN` platí **jen pro digitální
+vstupy** (z relé tlačítko neudělají).
 
 Víc pravidel záměrně není. Když ti něco vyjde jinak, přepiš typ entity nebo
 ikonu ručně v Home Assistantu.

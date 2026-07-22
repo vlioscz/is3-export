@@ -11,6 +11,7 @@ import pytest
 from custom_components.is3_export.export import (
     ICON_LAMP,
     ICON_FAN,
+    ICON_LED,
     ICON_MIRROR,
     PLATFORM_BINARY_SENSOR,
     PLATFORM_BUTTON,
@@ -22,6 +23,7 @@ from custom_components.is3_export.export import (
     effective_unit,
     is_impulse,
     is_named_light,
+    is_press_button,
     is_readable,
     is_writable,
     entity_icon,
@@ -113,6 +115,33 @@ def test_fans_get_a_fan_icon(name: str) -> None:
     entry = _entry(name)
     assert platform_of(entry) == PLATFORM_SWITCH
     assert entity_icon(entry) == ICON_FAN
+
+
+@pytest.mark.parametrize("name", ["LED_kuchyn", "LEDpas_ob", "Sv_LED_linka", "led_schody"])
+def test_led_strips_are_lights_with_the_strip_icon(name: str) -> None:
+    """An `LED` relay is a light, and gets the strip icon."""
+    entry = _entry(name)
+    assert is_named_light(entry)
+    assert platform_of(entry) == PLATFORM_LIGHT
+    assert entity_icon(entry) == ICON_LED
+
+
+def test_led_on_a_dimmer_gets_the_strip_icon() -> None:
+    """A dimmer named `LED_` is already a light; it still takes the strip icon."""
+    assert entity_icon(_entry("LED_pas", DIMMER, unit="%")) == ICON_LED
+
+
+def test_tl_and_din_inputs_are_press_buttons() -> None:
+    """A digital input named `TL_`, or a bare `DIN`, is a momentary button --
+    on the central unit's own inputs as much as a wall switch's."""
+    tl = _entry("Tl_kumbal", INPUT, hw_id="In-Out-CU3-01M-CU3-02M_DIN1_0F0001")
+    assert is_press_button(tl)
+    din = _entry("DIN2", INPUT, hw_id="In-Out-CU3-01M-CU3-02M_DIN2_0F0001")
+    assert is_press_button(din)
+    # An ordinary input that is neither stays a plain binary sensor.
+    other = _entry("Okno_loznice", INPUT, hw_id="SA3-022M_IN2_0F0002")
+    assert not is_press_button(other)
+    assert platform_of(other) == PLATFORM_BINARY_SENSOR
 
 
 def test_lamp_icon_does_not_reach_a_switch() -> None:

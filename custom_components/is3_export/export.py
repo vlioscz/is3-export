@@ -275,17 +275,23 @@ def is_counter(entry: Is3Entry) -> bool:
 # times -- and no other word starts with either.
 IMPULSE_TOKEN = "imp"
 LIGHT_TOKEN = "sv"
+# A button input the installer named `TL_` (tlačítko).  A whole token, so
+# `Tlumic` does not become a button; a `DIN` input is a button too (see below).
+BUTTON_TOKEN = "tl"
 
 # Supplementary lighting, named apart so it can be told from the main lights at
 # a glance.  Each gets its own icon, which is the reason the names differ.
 LAMP_PREFIX = "lamp"
 MIRROR_PREFIX = "zrc"
+# An LED strip -- `LED_pas`, `LED_kuchyn` -- a light with its own icon.
+LED_PREFIX = "led"
 # A fan on a relay -- `Vent_koup`, `VENT_WC_2np`.  Always a whole token; there
 # is no `ventil` in the exports, and matching it as a prefix might catch one.
 VENT_TOKEN = "vent"
 
 ICON_LAMP = "mdi:floor-lamp"
 ICON_MIRROR = "mdi:mirror"
+ICON_LED = "mdi:led-strip-variant"
 ICON_FAN = "mdi:fan"
 
 PLATFORM_BUTTON = "button"
@@ -332,7 +338,7 @@ def is_named_light(entry: Is3Entry) -> bool:
 
     tokens = name_tokens(entry)
     return LIGHT_TOKEN in tokens or any(
-        token.startswith((LAMP_PREFIX, MIRROR_PREFIX)) for token in tokens
+        token.startswith((LAMP_PREFIX, MIRROR_PREFIX, LED_PREFIX)) for token in tokens
     )
 
 
@@ -353,6 +359,8 @@ def entity_icon(entry: Is3Entry) -> str | None:
             return ICON_MIRROR
         if any(token.startswith(LAMP_PREFIX) for token in tokens):
             return ICON_LAMP
+        if any(token.startswith(LED_PREFIX) for token in tokens):
+            return ICON_LED
     elif platform == PLATFORM_SWITCH:
         if VENT_TOKEN in tokens:
             return ICON_FAN
@@ -947,22 +955,23 @@ def module_of(entry: Is3Entry) -> tuple[str, str] | None:
 
 
 def is_press_button(entry: Is3Entry) -> bool:
-    """Whether the entry is a button whose press length carries meaning.
+    """Whether the entry is a momentary button, reported as a press event.
 
-    A wall switch input, or an RF remote's, carries a long press -- held two
-    seconds or more -- that iNELS acts on but the export cannot describe, since
-    it is not a physical channel.  It can still be told apart from an ordinary
-    press by how long the input stays on, so these inputs get an event entity
-    that reports both.  A remote's low-battery flag is an input too, but not a
+    Every digital input of a wall switch (WSB) or RF remote (RFKEY) is a button.
+    On any other module -- the central unit's own inputs included -- a digital
+    input is a button when the installer named it `TL_` (tlačítko) or when it is
+    a bare `DIN` input.  A remote's low-battery flag is an input too, but not a
     button, so it is left out.
     """
+    if _class_of(entry) not in BINARY or is_battery_input(entry):
+        return False
     module = module_of(entry)
-    if module is None:
-        return False
-    model = module[0]
-    if not (model.startswith("WSB") or model == "RFKEY"):
-        return False
-    return _class_of(entry) in BINARY and not is_battery_input(entry)
+    if module is not None and (module[0].startswith("WSB") or module[0] == "RFKEY"):
+        return True
+    if BUTTON_TOKEN in name_tokens(entry):
+        return True
+    role = _role_from_hw_id(entry.hw_id) if entry.hw_id else None
+    return role is not None and role.upper().startswith("DIN")
 
 
 def is_battery_input(entry: Is3Entry) -> bool:
