@@ -128,10 +128,12 @@ z pohledu adresy totéž.
 `sv`, `imp`, `vent` a `TL` musí sedět jako celý token (jinak by `Svod_vody`
 bylo světlo), `lamp`, `zrc` a `LED` stačí jako předpona.
 
-**`TL_`** (tlačítko) a **`DIN`** vstupy jsou momentální tlačítka → `event`
-entita (drátové rozlišují `press` i `long_press`, viz
-[Nástěnné vypínače](#nástěnné-vypínače-wsb)). Platí i pro digitální vstupy **na
-samotné centrální jednotce** (In-Out), ne jen na vypínačích.
+**`TL_`** (tlačítko) udělá `event` tlačítko na **jakémkoli** modulu. **`DIN`**
+vstup je tlačítko na **nástěnných ovladačích** a na **samotné centrální
+jednotce** (In-Out); na ostatních modulech (např. vstupní modul `IM3`) je `DIN`
+běžný `binary_sensor` (udržovaný kontakt), dokud ho nepojmenuješ `TL_`. Drátové
+tlačítko rozlišuje `press` i `long_press` (viz
+[Nástěnné vypínače](#nástěnné-vypínače-wsb)).
 
 Tlačítko (`imp`) při stisku pošle **puls** — bit na `1` a hned zpět na `0`.
 Klidový stav je vždy `0`, takže každý další stisk je zase čistá náběžná hrana,
@@ -206,6 +208,13 @@ vyplyne to z typu adresy:
 
 Tlačítka (Up/Down/DIN) jsou **`event` entita**. Drátové vypínače (WSB) rozlišují
 **krátký `press` a `long_press`**; tlačítka **RF ovladače** hlásí jen `press`.
+
+Totéž rozpoznání platí pro **celou rodinu nástěnných ovladačů** — kromě `WSB3` i
+skleněné/dotykové `GSB3`, `GSP3`, `MSB3`, `GBP3`, `GRT3`, čtečky karet
+`GMR3`/`GCR3`/`GHR3`/`GCH3`, informační panely `GDB3`, `WMR3` a pokojový
+regulátor `IDRT3` (všechny drátové → `press`+`long_press`). RF zdroje jsou
+`RFKEY` a vstupní modul `IBWL` (jen `press`). Čidlo přiblížení a čtečka karty se
+jako tlačítka neberou.
 
 **Jak short/long funguje:** rozlišení potřebuje dobu držení = mezeru mezi
 sepnutím (`=1`) a rozepnutím (`=0`). Na drátovém vypínači je tahle mezera čistá a

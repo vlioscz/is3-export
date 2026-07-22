@@ -279,6 +279,25 @@ LIGHT_TOKEN = "sv"
 # `Tlumic` does not become a button; a `DIN` input is a button too (see below).
 BUTTON_TOKEN = "tl"
 
+# Wall and glass controllers whose every digital input is a momentary button,
+# the same as a WSB rocker: the touch/rocker keys on MSB, GSB, GSP, GBP, GRT,
+# GMR, GCR, GHR, GCH, GDB, WMR and the IDRT room controller.  None of these
+# prefixes collide with relay (SA/EA/IOU/LBC/ADC), dimmer (DA/DAC/DCDA), blind
+# (JA), sensor (TI) or input (IM) module models, so a prefix match is safe.
+_BUTTON_MODULE_PREFIXES = (
+    "WSB", "MSB", "GSB", "GSP", "GBP", "GRT",
+    "GMR", "GCR", "GHR", "GCH", "GDB", "WMR", "IDRT",
+)
+
+# RF button sources -- an RF remote (RFKEY) and the RF input module (IBWL).
+# Their release is dropped or delayed, so their buttons stay a single press.
+_RF_BUTTON_PREFIXES = ("RFKEY", "IBWL")
+
+# A panel's proximity ("wake") sensor and its card/chip reader are digital
+# inputs too, but pressing them is meaningless, so they stay off the button
+# path.  Matched loosely by role or name token; refine if an export disagrees.
+_NON_BUTTON_INPUT_TOKENS = ("prox", "prib", "card", "karta", "chip", "cip", "reader")
+
 # Supplementary lighting, named apart so it can be told from the main lights at
 # a glance.  Each gets its own icon, which is the reason the names differ.
 LAMP_PREFIX = "lamp"
@@ -954,20 +973,37 @@ def module_of(entry: Is3Entry) -> tuple[str, str] | None:
     return model, match["serial"]
 
 
+def _is_non_button_input(entry: Is3Entry) -> bool:
+    """A panel input that is not a button: a proximity/wake sensor or card reader."""
+    role = (_role_from_hw_id(entry.hw_id) if entry.hw_id else "") or ""
+    if role.lower().startswith(_NON_BUTTON_INPUT_TOKENS):
+        return True
+    return any(token.startswith(_NON_BUTTON_INPUT_TOKENS) for token in name_tokens(entry))
+
+
 def is_press_button(entry: Is3Entry) -> bool:
     """Whether the entry is a momentary button, reported as a press event.
 
-    Every digital input of a wall switch (WSB) or RF remote (RFKEY) is a button.
-    On any other module -- the central unit's own inputs included -- a digital
-    input is a button when the installer named it `TL_` (tlačítko) or when it is
-    a bare `DIN` input.  A remote's low-battery flag is an input too, but not a
-    button, so it is left out.
+    On a wall/glass controller (WSB, GSB, MSB, ...) or an RF source (RFKEY,
+    IBWL), every digital input is a button -- bar a proximity/card input or a
+    remote's low-battery flag.  On any other module a digital input is a
+    maintained contact, a button only when the installer named it `TL_`
+    (tlačítko).  On the central unit's own In-Out terminals a bare `DIN` input
+    is a button too.
     """
-    if _class_of(entry) not in BINARY or is_battery_input(entry):
+    if (
+        _class_of(entry) not in BINARY
+        or is_battery_input(entry)
+        or _is_non_button_input(entry)
+    ):
         return False
     module = module_of(entry)
-    if module is not None and (module[0].startswith("WSB") or module[0] == "RFKEY"):
-        return True
+    if module is not None:
+        if module[0].startswith(_BUTTON_MODULE_PREFIXES + _RF_BUTTON_PREFIXES):
+            return True
+        # Any other module's digital input is a maintained contact, not a
+        # button, unless the installer explicitly named it a tlačítko.
+        return BUTTON_TOKEN in name_tokens(entry)
     if BUTTON_TOKEN in name_tokens(entry):
         return True
     role = _role_from_hw_id(entry.hw_id) if entry.hw_id else None
@@ -975,14 +1011,14 @@ def is_press_button(entry: Is3Entry) -> bool:
 
 
 def is_rf_button(entry: Is3Entry) -> bool:
-    """Whether a button is on an RF remote (RFKEY).
+    """Whether a button is on an RF source (an RFKEY remote or an IBWL RF input).
 
     A wired switch delivers its release reliably and promptly, so the hold
-    length -- and thus short vs long press -- is recoverable.  An RF remote drops
-    or delays the release, so its buttons stay a single ``press``.
+    length -- and thus short vs long press -- is recoverable.  RF drops or delays
+    the release, so its buttons stay a single ``press``.
     """
     module = module_of(entry)
-    return module is not None and module[0] == "RFKEY"
+    return module is not None and module[0].startswith(_RF_BUTTON_PREFIXES)
 
 
 def is_battery_input(entry: Is3Entry) -> bool:
