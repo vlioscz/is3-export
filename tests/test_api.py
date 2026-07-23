@@ -19,7 +19,7 @@ from custom_components.is3_export.const import (
 
 def _client(delimiter: str = DELIMITER_SPACE) -> Is3Client:
     """A client that never connects, used only to build command bytes."""
-    return Is3Client("192.168.1.10", 22272, delimiter)
+    return Is3Client("192.168.1.10", 1111, delimiter)
 
 
 def test_space_command_matches_the_working_script() -> None:
@@ -103,7 +103,7 @@ def test_every_delimiter_idm_offers_round_trips(delimiter: str) -> None:
 
     The dialect is chosen per installation, so all of them are real cases.
     """
-    client = Is3Client("192.168.1.10", 22272, delimiter)
+    client = Is3Client("192.168.1.10", 1111, delimiter)
     sent = client._command("GET", "0x0102000A").decode("ascii").strip()
 
     reply = sent.replace("GET", "GET", 1) + delimiter + "0x00000001"
@@ -153,7 +153,7 @@ def test_values_are_sent_in_the_units_number_base() -> None:
     read the same either way.
     """
     hex_client = _client()
-    dec_client = Is3Client("192.168.1.10", 22272, DELIMITER_SPACE, BASE_DEC)
+    dec_client = Is3Client("192.168.1.10", 1111, DELIMITER_SPACE, BASE_DEC)
 
     assert hex_client.format_value(100) == "64"
     assert dec_client.format_value(100) == "100"
@@ -176,7 +176,7 @@ def test_full_brightness_command_in_hex() -> None:
 def test_decimal_addresses_are_sent_in_decimal() -> None:
     """A unit set to decimal must not be sent 0x-prefixed addresses."""
     hex_client = _client()
-    dec_client = Is3Client("192.168.1.10", 22272, DELIMITER_SPACE, BASE_DEC)
+    dec_client = Is3Client("192.168.1.10", 1111, DELIMITER_SPACE, BASE_DEC)
     assert hex_client.format_address("0x0102000A") == "0x0102000A"
     assert dec_client.format_address("0x0102000A") == "16908298"
     assert dec_client._command("SET", dec_client.format_address("0x0102000A"), 1) == (

@@ -13,8 +13,8 @@ does. It is read-only by default: it never sends SET unless you pass --write.
 
 Usage::
 
-    python probe_is3.py 192.168.1.10 22272 0x0102000A
-    python probe_is3.py 192.168.1.10 22272 0x0102000A --write
+    python probe_is3.py 192.168.1.10 1111 0x0102000A
+    python probe_is3.py 192.168.1.10 1111 0x0102000A --write
 
 Run it from a machine on the same network as the unit and paste the output back.
 """
@@ -139,7 +139,7 @@ def main() -> int:
     """Run the probes selected on the command line."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("host", help="IP address of the central unit")
-    parser.add_argument("port", type=int, help="ASCII port, e.g. 22272 or 1111")
+    parser.add_argument("port", type=int, help="ASCII port, e.g. 1111 or 22272")
     parser.add_argument("address", help="an address to read, e.g. 0x0102000A")
     parser.add_argument(
         "--write",

@@ -73,7 +73,7 @@ Manually: copy `custom_components/is3_export` into `config/custom_components/`.
 | Field | Description | Default |
 | --- | --- | --- |
 | Host | The unit's IP address | — |
-| ASCII port | **from IDM3** | `22272` |
+| ASCII port | **from IDM3** (default `1111`) | `1111` |
 | Export file path | leave empty, it downloads from the unit | empty |
 | Separator | **from IDM3**, offers all 27 options | space `[32]` |
 | Number base | **from IDM3** | hexadecimal |
@@ -346,7 +346,7 @@ Verified in isolation: the integration itself causes no freezing — it arises
 only when the Connection Server is also connected.
 
 > The number of clients isn't related either: the central unit has a **limited
-> number of ASCII connections**. Don't point a lot of clients at port `22272` at
+> number of ASCII connections**. Don't point a lot of clients at the ASCII port at
 > once — when the slots run out, the unit will accept the connection but stop
 > serving it (the HTTP export keeps running), and only a CU restart helps.
 

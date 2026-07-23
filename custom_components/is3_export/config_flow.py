@@ -38,8 +38,8 @@ _LOGGER = logging.getLogger(__name__)
 STEP_USER_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): str,
-        # The ASCII port has no factory default -- the installer chooses a free
-        # one in IDM3 -- so it must be entered, not assumed.
+        # iNELS documents 1111 as the default ASCII port, so it is pre-filled;
+        # it can be changed in IDM3, so the field stays editable.
         vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
         vol.Optional(CONF_EXPORT_FILE, default=""): str,
         # No credentials are asked for: the unit serves the export as a static

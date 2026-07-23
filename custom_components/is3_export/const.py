@@ -56,10 +56,11 @@ CONF_NUMBER_BASE: Final = "number_base"
 # field to pushed events, and that is detected from the field count instead, so
 # both modes work without the user having to say which one is set.
 
-# The ASCII port the central unit listens on.  Working scripts from this
-# installation used 1111 in 2022 and 22272 in 2024, so it is configurable and
-# the newer value is the default.
-DEFAULT_PORT: Final = 22272
+# The ASCII port the central unit listens on.  iNELS documents 1111 as the
+# factory default, so that is what is offered; it is configurable in IDM3 and
+# some installers change it -- this project's own unit was moved to 22272 in
+# 2024, having used 1111 in 2022.
+DEFAULT_PORT: Final = 1111
 
 DEFAULT_SCAN_INTERVAL: Final = timedelta(seconds=30)
 
