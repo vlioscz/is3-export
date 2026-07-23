@@ -22,5 +22,11 @@
     "abort": {
       "already_configured": "Tato centrální jednotka už je nastavená"
     }
+  },
+  "issues": {
+    "reads_unsupported": {
+      "title": "IS3 Export nedokáže číst stav jednotky",
+      "description": "Centrální jednotka neodpověděla na čtení s oddělovačem {delimiter} a soustavou {number_base}, takže entity zobrazují odhadovaný stav místo živé hodnoty.\n\nOtevři nastavení protokolu třetích stran (ASCII) v iNELS IDM3, srovnej oddělovač a číselnou soustavu, pak integraci odeber a přidej znovu se správnými hodnotami."
+    }
   }
 }

@@ -28,6 +28,7 @@ from .const import (
     MODEL,
 )
 from .coordinator import Is3ConfigEntry, Is3Coordinator
+from .issues import async_clear_issues, async_update_reads_issue
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -85,6 +86,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: Is3ConfigEntry) -> bool:
     entry.async_on_unload(client.async_close)
 
     await coordinator.async_detect_capabilities()
+    # A delimiter or number base that does not match the unit leaves reads
+    # unanswered; raise a repair card so it is not just a line in the log.
+    async_update_reads_issue(
+        hass,
+        entry.entry_id,
+        reads_supported=coordinator.reads_supported,
+        delimiter=entry.data.get(CONF_DELIMITER, DELIMITER_SPACE),
+        number_base=entry.data.get(CONF_NUMBER_BASE, BASE_HEX),
+    )
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator
@@ -138,3 +148,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: Is3ConfigEntry) -> bool
 async def async_reload_entry(hass: HomeAssistant, entry: Is3ConfigEntry) -> None:
     """Reload when the options change, so a new delimiter takes effect."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: Is3ConfigEntry) -> None:
+    """Clear this unit's repair cards when it is removed."""
+    async_clear_issues(hass, entry.entry_id)
