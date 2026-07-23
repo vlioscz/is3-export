@@ -22,11 +22,9 @@ jobs:
       - uses: actions/checkout@v5
       - uses: hacs/action@main
         with:
+          # Brand assets ship in-repo under custom_components/is3_export/brand/,
+          # which the brand check accepts since HA 2026.3, so nothing is ignored.
           category: integration
-          # Brand assets live in the home-assistant/brands repository, which
-          # only accepts integrations that ship with Home Assistant or are in
-          # the HACS default list. A custom repository cannot satisfy this.
-          ignore: brands
 
   tests:
     name: Tests
