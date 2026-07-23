@@ -11,6 +11,17 @@
           "delimiter": "Oddělovač (z IDM3)",
           "number_base": "Číselná soustava (z IDM3)"
         }
+      },
+      "reconfigure": {
+        "title": "Centrální jednotka iNELS (CU3)",
+        "description": "Uprav, jak se Home Assistant připojuje k jednotce. Port, oddělovač a číselná soustava musí odpovídat nastavení protokolu třetích stran (ASCII) v iNELS IDM3. Když necháš cestu k exportu prázdnou, stáhne se z jednotky.",
+        "data": {
+          "host": "Adresa",
+          "port": "ASCII port (z IDM3)",
+          "export_file": "Cesta k exportnímu souboru (prázdné = stáhnout)",
+          "delimiter": "Oddělovač (z IDM3)",
+          "number_base": "Číselná soustava (z IDM3)"
+        }
       }
     },
     "error": {
@@ -20,7 +31,9 @@
       "unknown": "Neočekávaná chyba"
     },
     "abort": {
-      "already_configured": "Tato centrální jednotka už je nastavená"
+      "already_configured": "Tato centrální jednotka už je nastavená",
+      "reconfigure_successful": "Nastavení připojení bylo aktualizováno",
+      "wrong_unit": "Tato adresa je jiná centrální jednotka než tento záznam. Přidej ji jako novou integraci."
     }
   },
   "issues": {

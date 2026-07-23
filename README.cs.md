@@ -83,7 +83,17 @@ bez přihlášení, takže **heslo projektu iNELS na jeho dostupnost nemá vliv*
 (Kdyby přesto nějaká jednotka stažení blokovala, zadej cestu k lokálně
 staženému exportu.)
 
-Když entity hlásí *odhadovaný stav*, sedí ti špatně **oddělovač**.
+Když entity hlásí *odhadovaný stav*, sedí ti špatně **oddělovač** nebo
+**číselná soustava** — Home Assistant na to upozorní opravou (repair). Nemusíš
+integraci mazat, stačí ji přenastavit: **Nastavení → Zařízení a služby →
+IS3 Export → ⋮ → Překonfigurovat**.
+
+## Odebrání integrace
+
+**Nastavení → Zařízení a služby → IS3 Export → ⋮ → Smazat.** Tím se zavře
+spojení a odeberou se všechny entity a zařízení, které integrace vytvořila.
+V centrální jednotce nic nezůstane — integrace s ní jen komunikovala po síti —
+a mimo `custom_components/is3_export` se nezapisují žádné soubory.
 
 ## Které adresy se stanou entitami
 

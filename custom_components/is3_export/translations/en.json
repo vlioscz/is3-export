@@ -11,6 +11,17 @@
           "delimiter": "Delimiter (from IDM3)",
           "number_base": "Number base (from IDM3)"
         }
+      },
+      "reconfigure": {
+        "title": "iNELS central unit (CU3)",
+        "description": "Update how Home Assistant connects to the unit. The port, delimiter and number base must match the third-party (ASCII) settings in iNELS IDM3. Leave the export file path empty to download the export from the unit.",
+        "data": {
+          "host": "Host",
+          "port": "ASCII port (from IDM3)",
+          "export_file": "Export file path (leave empty to download)",
+          "delimiter": "Delimiter (from IDM3)",
+          "number_base": "Number base (from IDM3)"
+        }
       }
     },
     "error": {
@@ -20,7 +31,9 @@
       "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "This central unit is already configured"
+      "already_configured": "This central unit is already configured",
+      "reconfigure_successful": "The connection settings were updated",
+      "wrong_unit": "That address is a different central unit than this entry. Add it as a new integration instead."
     }
   },
   "issues": {

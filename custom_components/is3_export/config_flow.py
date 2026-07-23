@@ -1,4 +1,11 @@
-"""Config flow for the IS3 Export integration."""
+"""Config flow for the IS3 Export integration.
+
+Both the initial setup and a later reconfigure share one form and one
+validation path: load the export (from the unit or a local file) and probe the
+ASCII port.  Reconfigure lets the port, delimiter or number base be corrected
+without removing the integration -- which matters because a wrong delimiter or
+base leaves every read unanswered (see the repair card in ``issues.py``).
+"""
 
 from __future__ import annotations
 
@@ -35,26 +42,47 @@ from .source import (
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_HOST): str,
-        # iNELS documents 1111 as the default ASCII port, so it is pre-filled;
-        # it can be changed in IDM3, so the field stays editable.
-        vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
-        vol.Optional(CONF_EXPORT_FILE, default=""): str,
-        # No credentials are asked for: the unit serves the export as a static
-        # file over HTTP on port 80, without authentication, so the iNELS
-        # project password does not gate it.  A unit that somehow blocks the
-        # download can still be set up from a local export file.
-        # These two must match the "Third part setting" page in IDM3.
-        vol.Optional(CONF_DELIMITER, default=DELIMITER_SPACE): vol.In(DELIMITERS),
-        vol.Optional(CONF_NUMBER_BASE, default=BASE_HEX): vol.In(NUMBER_BASES),
-    }
-)
+
+def build_schema(defaults: dict[str, Any]) -> vol.Schema:
+    """The setup form, pre-filled from ``defaults``.
+
+    Empty defaults give a fresh install (host blank, the documented port and the
+    common delimiter/base); the reconfigure step passes the entry's own values
+    so the form opens on what is currently set.
+    """
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_HOST, default=defaults.get(CONF_HOST, vol.UNDEFINED)
+            ): str,
+            vol.Required(CONF_PORT, default=defaults.get(CONF_PORT, DEFAULT_PORT)): int,
+            vol.Optional(
+                CONF_EXPORT_FILE, default=defaults.get(CONF_EXPORT_FILE, "")
+            ): str,
+            vol.Optional(
+                CONF_DELIMITER, default=defaults.get(CONF_DELIMITER, DELIMITER_SPACE)
+            ): vol.In(DELIMITERS),
+            vol.Optional(
+                CONF_NUMBER_BASE, default=defaults.get(CONF_NUMBER_BASE, BASE_HEX)
+            ): vol.In(NUMBER_BASES),
+        }
+    )
+
+
+def unit_identity(export: Is3Export, host: str) -> tuple[str, str]:
+    """The unique id and title for a unit.
+
+    The export header carries an installation id and name; without them the host
+    is the best identifier and a generic title is used.
+    """
+    header = export.header
+    unique_id = header.unit_id if header and header.unit_id else host
+    title = header.name if header and header.name else f"IS3 {host}"
+    return unique_id, title
 
 
 class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle the setup dialog for one central unit."""
+    """Handle the setup and reconfigure dialogs for one central unit."""
 
     VERSION = 1
 
@@ -65,54 +93,79 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            export: Is3Export | None = None
-
-            try:
-                export = await self._async_load_export(user_input)
-            except Is3ExportAuthError as err:
-                # This unit's export is unprotected; a unit that blocks the
-                # download must be set up from a local export file instead.
-                _LOGGER.debug("Export is protected: %s", err)
-                errors[CONF_EXPORT_FILE] = "invalid_auth"
-            except Is3ExportError as err:
-                _LOGGER.debug("Cannot load export: %s", err)
-                errors[CONF_EXPORT_FILE] = "invalid_export"
-
-            if not errors:
-                client = Is3Client(
-                    user_input[CONF_HOST],
-                    user_input[CONF_PORT],
-                    user_input[CONF_DELIMITER],
-                    user_input[CONF_NUMBER_BASE],
-                )
-                try:
-                    await client.async_connect()
-                except Is3ConnectionError:
-                    errors[CONF_HOST] = "cannot_connect"
-                except Exception:  # noqa: BLE001
-                    _LOGGER.exception("Unexpected error connecting to the IS3 unit")
-                    errors["base"] = "unknown"
-                finally:
-                    await client.async_close()
-
+            export, errors = await self._async_validate(user_input)
             if not errors and export is not None:
-                # The export header carries an installation ID; without it the
-                # host is the best available identifier.
-                header = export.header
-                unique_id = (
-                    header.unit_id if header and header.unit_id else user_input[CONF_HOST]
-                )
+                unique_id, title = unit_identity(export, user_input[CONF_HOST])
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
-
-                title = (
-                    header.name if header and header.name else f"IS3 {user_input[CONF_HOST]}"
-                )
                 return self.async_create_entry(title=title, data=user_input)
 
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_SCHEMA, errors=errors
+            step_id="user",
+            data_schema=build_schema(user_input or {}),
+            errors=errors,
         )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change the connection settings of an existing unit."""
+        errors: dict[str, str] = {}
+        entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            export, errors = await self._async_validate(user_input)
+            if not errors and export is not None:
+                unique_id, _title = unit_identity(export, user_input[CONF_HOST])
+                await self.async_set_unique_id(unique_id)
+                # Reconfiguring must stay on the same unit, not repoint the entry
+                # at a different one and shadow whatever entry already owns it.
+                self._abort_if_unique_id_mismatch(reason="wrong_unit")
+                return self.async_update_reload_and_abort(entry, data_updates=user_input)
+
+        defaults = user_input if user_input is not None else dict(entry.data)
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=build_schema(defaults),
+            errors=errors,
+        )
+
+    async def _async_validate(
+        self, user_input: dict[str, Any]
+    ) -> tuple[Is3Export | None, dict[str, str]]:
+        """Load the export and probe the ASCII port; return (export, errors)."""
+        errors: dict[str, str] = {}
+        export: Is3Export | None = None
+
+        try:
+            export = await self._async_load_export(user_input)
+        except Is3ExportAuthError as err:
+            # This installation's export is unprotected; a unit that blocks the
+            # download must be set up from a local export file instead.
+            _LOGGER.debug("Export is protected: %s", err)
+            errors[CONF_EXPORT_FILE] = "invalid_auth"
+        except Is3ExportError as err:
+            _LOGGER.debug("Cannot load export: %s", err)
+            errors[CONF_EXPORT_FILE] = "invalid_export"
+
+        if not errors:
+            client = Is3Client(
+                user_input[CONF_HOST],
+                user_input[CONF_PORT],
+                user_input[CONF_DELIMITER],
+                user_input[CONF_NUMBER_BASE],
+            )
+            try:
+                await client.async_connect()
+            except Is3ConnectionError:
+                errors[CONF_HOST] = "cannot_connect"
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Unexpected error connecting to the IS3 unit")
+                errors["base"] = "unknown"
+            finally:
+                await client.async_close()
+
+        return export, errors
 
     async def _async_load_export(self, user_input: dict[str, Any]) -> Is3Export:
         """Load the export from disk, or from the unit when no path is given."""

@@ -85,7 +85,17 @@ file with no login, so **the iNELS project password has no effect on its
 availability**. (If some unit blocks the download anyway, enter the path to a
 locally downloaded export.)
 
-If entities report an *estimated state*, your **separator** is wrong.
+If entities report an *estimated state*, your **separator** or **number base**
+is wrong — Home Assistant raises a repair issue to say so. You can correct it
+without removing the integration: **Settings → Devices & services → IS3 Export
+→ ⋮ → Reconfigure**.
+
+## Removing the integration
+
+**Settings → Devices & services → IS3 Export → ⋮ → Delete.** This closes the
+connection and removes every entity and device the integration created. Nothing
+is left behind on the central unit — the integration only ever talked to it over
+the network — and no files are written outside `custom_components/is3_export`.
 
 ## Which addresses become entities
 

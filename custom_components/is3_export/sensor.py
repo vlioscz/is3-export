@@ -7,7 +7,13 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import PERCENTAGE, UnitOfElectricPotential, UnitOfTemperature
+from homeassistant.const import (
+    PERCENTAGE,
+    UnitOfElectricPotential,
+    UnitOfEnergy,
+    UnitOfTemperature,
+    UnitOfVolume,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -30,6 +36,51 @@ UNITS: dict[str, tuple[str, SensorDeviceClass | None]] = {
     "°C": (UnitOfTemperature.CELSIUS, SensorDeviceClass.TEMPERATURE),
     "mV": (UnitOfElectricPotential.MILLIVOLT, SensorDeviceClass.VOLTAGE),
 }
+
+# A meter's unit, when the export carries one, decides its device class -- which
+# is what places it in the Energy dashboard (that also wants a total state class,
+# which every counter already has).  Matched case-insensitively against the units
+# the export could plausibly write; a counter with no unit, or an unrecognised
+# one such as a bare pulse count, is left a plain increasing total, exactly as
+# before -- nothing is guessed.
+_ENERGY_UNITS: dict[str, str] = {
+    "wh": UnitOfEnergy.WATT_HOUR,
+    "kwh": UnitOfEnergy.KILO_WATT_HOUR,
+    "mwh": UnitOfEnergy.MEGA_WATT_HOUR,
+    "gj": UnitOfEnergy.GIGA_JOULE,
+}
+_VOLUME_UNITS: dict[str, str] = {
+    "m3": UnitOfVolume.CUBIC_METERS,
+    "m³": UnitOfVolume.CUBIC_METERS,
+    "l": UnitOfVolume.LITERS,
+    "ft3": UnitOfVolume.CUBIC_FEET,
+    "ft³": UnitOfVolume.CUBIC_FEET,
+}
+# A cubic metre fits both water and gas; the name is what tells them apart.
+_GAS_TOKENS = ("plyn", "gas")
+
+
+def counter_metric(entry: Is3Entry) -> tuple[str, SensorDeviceClass] | None:
+    """The unit and device class for a meter, or None to leave it a plain total.
+
+    Only a recognised energy or volume unit yields a device class; without one
+    the meter still records a long-term total, it just does not claim to be
+    energy, water or gas in the Energy dashboard.
+    """
+    if not is_counter(entry):
+        return None
+    unit = effective_unit(entry)
+    if unit is None:
+        return None
+
+    key = unit.strip().lower()
+    if key in _ENERGY_UNITS:
+        return _ENERGY_UNITS[key], SensorDeviceClass.ENERGY
+    if key in _VOLUME_UNITS:
+        identity = f"{entry.name} {entry.hw_id or ''}".lower()
+        gas = any(token in identity for token in _GAS_TOKENS)
+        return _VOLUME_UNITS[key], SensorDeviceClass.GAS if gas else SensorDeviceClass.WATER
+    return None
 
 
 async def async_setup_entry(
@@ -56,9 +107,15 @@ class Is3Sensor(Is3Entity, SensorEntity):
         super().__init__(coordinator, entry)
         self._scale = value_scale(entry)
         if is_counter(entry):
-            # Meter readings only climb, so they can back long-term statistics.
+            # Meters only climb, so they back long-term statistics; a recognised
+            # unit also gives them a device class and a place in the Energy
+            # dashboard.  An unrecognised or absent unit is passed through as-is.
             self._attr_state_class = SensorStateClass.TOTAL_INCREASING
-        if (reading_unit := effective_unit(entry)) is not None:
+            if (metric := counter_metric(entry)) is not None:
+                self._attr_native_unit_of_measurement, self._attr_device_class = metric
+            elif (unit := effective_unit(entry)) is not None:
+                self._attr_native_unit_of_measurement = unit
+        elif (reading_unit := effective_unit(entry)) is not None:
             unit, device_class = UNITS.get(reading_unit, (reading_unit, None))
             self._attr_native_unit_of_measurement = unit
             self._attr_device_class = device_class
