@@ -22,16 +22,14 @@ directly: 1 runs the motor, 0 stops it, and the two directions are interlocked
 in hardware, so the opposite direction has to be released before reversing.
 Stop releases both.  Used only when the export contains no blind program.
 
-Neither reports a position, so the covers carry an assumed state.  What they do
-report is direction: the relays hold their value while the motor runs, and the
-program bits are pulses that the unit clears when the blind arrives.
+Unlike a program bit, a bare relay does not release itself, so a direction left
+running would hold the contact closed for good.  These covers therefore carry a
+per-blind *travel time* (a Number the installer sets), and a move driven from
+Home Assistant is released once it has elapsed.
 
-A live test on a program-bit blind confirmed the model: driving up or down
-holds that direction until the program's configured run time elapses (about a
-minute for a normal window) or the stop bit is pulsed, either of which clears
-the direction so the blind can be driven again, and a tilt is a brief pulse the
-program clears itself.  So even a blind with no end sensor stops on its own; the
-integration does not need to know or track the run time.
+Neither source reports a position, so the covers carry an assumed state.  What
+they do report is direction: the relays hold their value while the motor runs,
+and the program bits are pulses that the unit clears when the blind arrives.
 """
 
 from __future__ import annotations
@@ -46,10 +44,11 @@ from homeassistant.components.cover import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import Is3Error
-from .const import DOMAIN, MANUFACTURER, MODEL
+from .const import DEFAULT_COVER_TRAVEL_TIME, DOMAIN, MANUFACTURER, MODEL
 from .coordinator import Is3ConfigEntry, Is3Coordinator
 from .export import Is3Cover, find_covers
 
@@ -65,6 +64,10 @@ PULSE = 1
 # landed before the opposite direction is asked for.
 REVERSE_DELAY = 0.5
 
+# A relay source drives its contacts directly (it needs releasing after a run);
+# a program bit is a request the unit's program already times and stops.
+RELAY = "relay"
+
 
 def needs_release_first(source: str, other_value: int | None) -> bool:
     """Whether the opposite direction has to be released before driving.
@@ -73,7 +76,7 @@ def needs_release_first(source: str, other_value: int | None) -> bool:
     that sorts the motor out itself.  A relay that is not running needs no
     release, so opening from standstill stays a single write.
     """
-    return source == "relay" and bool(other_value)
+    return source == RELAY and bool(other_value)
 
 
 async def async_setup_entry(
@@ -99,6 +102,9 @@ class Is3CoverEntity(CoordinatorEntity[Is3Coordinator], CoverEntity):
         """Advertise only the actions this blind's wiring supports."""
         super().__init__(coordinator)
         self.cover = cover
+        # A relay pair is driven directly, so it is released after a run rather
+        # than left holding the contact closed.
+        self._timed = cover.source == RELAY
 
         config_entry_id = coordinator.config_entry.entry_id
         self._attr_unique_id = f"{config_entry_id}_{cover.unique_id}"
@@ -111,12 +117,23 @@ class Is3CoverEntity(CoordinatorEntity[Is3Coordinator], CoverEntity):
         }
 
         features = CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE
-        if cover.stop is not None or cover.source == "relay":
+        if cover.stop is not None or cover.source == RELAY:
             # A relay pair stops by releasing both directions.
             features |= CoverEntityFeature.STOP
         if cover.has_tilt:
             features |= CoverEntityFeature.OPEN_TILT | CoverEntityFeature.CLOSE_TILT
         self._attr_supported_features = features
+
+        # Cancels a pending auto-release; set while a Home-Assistant-driven move
+        # is running.  A move begun at the wall gets none -- the unit releases it.
+        self._stop_unsub: Any = None
+
+    @property
+    def travel_time(self) -> float:
+        """The configured run time for this blind, in seconds."""
+        return self.coordinator.cover_travel_times.get(
+            self.cover.open.address, DEFAULT_COVER_TRAVEL_TIME
+        )
 
     async def async_added_to_hass(self) -> None:
         """Wake this blind when either direction it shows changes.
@@ -132,6 +149,11 @@ class Is3CoverEntity(CoordinatorEntity[Is3Coordinator], CoverEntity):
                     address, self.async_write_ha_state
                 )
             )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Drop a pending auto-release so nothing fires after the entity is gone."""
+        self._cancel_stop()
+        await super().async_will_remove_from_hass()
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:
@@ -167,15 +189,22 @@ class Is3CoverEntity(CoordinatorEntity[Is3Coordinator], CoverEntity):
         return bool(self._value(self.cover.close.address))
 
     async def async_open_cover(self, **kwargs: Any) -> None:
-        """Raise the blind."""
+        """Raise the blind, releasing the relay once the travel time has run."""
+        self._cancel_stop()
         await self._async_drive(self.cover.open, self.cover.close)
+        if self._timed:
+            self._schedule_stop(self.travel_time)
 
     async def async_close_cover(self, **kwargs: Any) -> None:
-        """Lower the blind."""
+        """Lower the blind, releasing the relay once the travel time has run."""
+        self._cancel_stop()
         await self._async_drive(self.cover.close, self.cover.open)
+        if self._timed:
+            self._schedule_stop(self.travel_time)
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the blind where it is."""
+        self._cancel_stop()
         if self.cover.stop is not None:
             await self._async_write(self.cover.stop, PULSE)
             return
@@ -194,6 +223,22 @@ class Is3CoverEntity(CoordinatorEntity[Is3Coordinator], CoverEntity):
         """Angle the slats down."""
         if self.cover.tilt_close is not None:
             await self._async_write(self.cover.tilt_close, PULSE)
+
+    def _schedule_stop(self, delay: float) -> None:
+        """Release this blind after ``delay`` seconds, unless stopped sooner."""
+        self._stop_unsub = async_call_later(self.hass, delay, self._async_auto_stop)
+
+    def _cancel_stop(self) -> None:
+        """Cancel a pending auto-release."""
+        if self._stop_unsub is not None:
+            self._stop_unsub()
+            self._stop_unsub = None
+
+    async def _async_auto_stop(self, _now: Any = None) -> None:
+        """Release both directions once a timed move's run has elapsed."""
+        self._stop_unsub = None
+        await self._async_write(self.cover.open, OFF)
+        await self._async_write(self.cover.close, OFF)
 
     async def _async_drive(self, engage, release) -> None:
         """Start moving one way.

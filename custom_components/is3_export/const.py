@@ -69,6 +69,15 @@ DEFAULT_SCAN_INTERVAL: Final = timedelta(seconds=30)
 EXPORT_RELOAD_INTERVAL: Final = timedelta(minutes=30)
 CONNECT_TIMEOUT: Final = 10.0
 
+# Relay-driven blinds report no position, so it is estimated from how long a
+# direction runs against a per-blind travel time (seconds), exposed as a Number
+# the installer tunes.  A run lasting the whole time is taken to have reached the
+# end, which recalibrates the estimate -- and the unit's own blind timing drops
+# the relay there even when the wall drove it, so that end is actually observed.
+DEFAULT_COVER_TRAVEL_TIME: Final = 30
+COVER_TRAVEL_TIME_MIN: Final = 1
+COVER_TRAVEL_TIME_MAX: Final = 300
+
 # Second byte of an address encodes what the address does.
 TYPE_DOUT: Final = 0x01
 TYPE_RELAY: Final = 0x02

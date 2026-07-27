@@ -643,27 +643,41 @@ def _covers_from_driver_channels(export: Is3Export) -> list[Is3Cover]:
 
 # A blind is not always on a JA3 driver.  On a plain relay module (SA3, ...) the
 # installer wires two outputs to one motor, interlocks them in hardware, and puts
-# the direction in the entry *name* -- ``Roleta_loznice_UP`` / ``_DOWN`` -- while
-# the hardware id is a bare ``SA3-04M_RE3_0C0004``.  Both halves must share one
-# module, since that is where the interlock is wired, so the same base name reused
-# on another module is never mispaired.
-_NAME_DIRECTION = re.compile(r"^(?P<base>.+)_(?P<direction>UP|DOWN)$", re.IGNORECASE)
+# the direction in the entry *name* while the hardware id is a bare
+# ``SA3-04M_RE3_0C0004``.  Both halves must share one module, since that is where
+# the interlock is wired, so the same base name reused on another module is never
+# mispaired.
+#
+# The direction word is matched as a whole ``_``-separated token so it can sit
+# anywhere -- a suffix, ``Roleta_loznice_UP``, or in the middle, ``Rol_UP_pokoj``
+# (as one box-module install writes it) -- and is removed to get the base name.
+_DIRECTION_WORDS = ("up", "down")
 
 
 def _name_direction(entry: Is3Entry) -> tuple[str, str] | None:
-    """Split a labelled ``<base>_UP`` / ``<base>_DOWN`` name into (base, up|down)."""
+    """Split a name carrying one ``UP``/``DOWN`` token into (base, up|down).
+
+    Returns None for a name with no direction word or with two, which is
+    ambiguous.  The base is what is left once the direction token is removed, and
+    it must not be empty.
+    """
     if not entry.labelled:
         return None
-    match = _NAME_DIRECTION.match(entry.name)
-    if match is None:
+    tokens = entry.name.split("_")
+    found = [i for i, token in enumerate(tokens) if token.lower() in _DIRECTION_WORDS]
+    if len(found) != 1:
         return None
-    return match["base"], match["direction"].lower()
+    index = found[0]
+    base = "_".join(tokens[:index] + tokens[index + 1 :])
+    if not base:
+        return None
+    return base, tokens[index].lower()
 
 
 def _strip_name_direction(name: str) -> str:
-    """``Roleta_loznice_UP`` -> ``Roleta_loznice``, keeping the original case."""
-    match = _NAME_DIRECTION.match(name)
-    return match["base"] if match else name
+    """Drop the ``UP``/``DOWN`` token from a name, keeping the original case."""
+    kept = [token for token in name.split("_") if token.lower() not in _DIRECTION_WORDS]
+    return "_".join(kept) if kept else name
 
 
 def _covers_from_named_relay_pairs(

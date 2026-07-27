@@ -218,6 +218,8 @@ Vent_koup_UP SA3-06M_RE3_0C0006 0x01020017 0x00000000
 Sv_koup SA3-06M_RE1_0C0006 0x01020015 0x00000000
 Half_UP SA3-04M_RE1_0AAAAA 0x010200E1 0x00000000
 Half_DOWN SA3-04M_RE1_0BBBBB 0x010200E2 0x00000000
+Rol_UP_pokoj SA3-02B_RE1_0C0009 0x010200F6 0x00000000
+Rol_DOWN_pokoj SA3-02B_RE2_0C0009 0x010200F7 0x00000000
 """
 
 
@@ -242,6 +244,19 @@ def test_two_named_blinds_on_one_module_stay_separate(named_covers) -> None:
     assert named_covers["Roleta_loznice"].open.address == 0x01020021
     assert named_covers["Roleta_koupelna"].open.address == 0x0102001F
     assert named_covers["Dvere_ter"].open.address == 0x0102001B
+
+
+def test_direction_in_the_middle_of_the_name_pairs(named_covers) -> None:
+    """`Rol_UP_pokoj` / `Rol_DOWN_pokoj` pair, direction word and all.
+
+    A box relay module writes the direction in the middle of the name rather than
+    as a suffix; it is matched as a whole token wherever it sits and removed to
+    get the base the two halves share.
+    """
+    cover = named_covers["Rol_pokoj"]
+    assert cover.source == "relay"
+    assert cover.open.address == 0x010200F6
+    assert cover.close.address == 0x010200F7
 
 
 def test_a_lone_direction_is_not_a_blind(named_covers) -> None:

@@ -137,6 +137,10 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         # address -> times it was read and answered no value; capped so a
         # permanently-"N" address stops being re-read every scan (see below).
         self._seed_attempts: dict[int, int] = {}
+        # Per-relay-blind travel time in seconds, keyed by the cover's open
+        # address.  Owned by the travel-time Number entities, read by the covers
+        # to time an auto-stop and to scale their position estimate.
+        self.cover_travel_times: dict[int, float] = {}
 
     @property
     def values(self) -> dict[int, int]:
