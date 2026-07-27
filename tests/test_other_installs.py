@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from custom_components.is3_export.export import (
+    Is3Entry,
     is_binary,
     is_controller_internal,
     PLATFORM_NUMBER,
@@ -21,6 +22,7 @@ from custom_components.is3_export.export import (
     is_number,
     is_readable,
     is_switchable,
+    module_of,
     platform_of,
     is_writable,
     parse_export,
@@ -71,6 +73,25 @@ def test_controller_internals_stay_read_only(export, address: int) -> None:
     entry = export.by_address(address)
     assert is_controller_internal(entry)
     assert not is_writable(entry)
+
+
+def test_heat_regulator_is_an_internal_block() -> None:
+    """The global heat-source regulator is internal, like a zone controller.
+
+    Its ``-DIN`` channels sit in the relay range but must stay read-only rather
+    than become writable switches, and none of its channels forms its own device
+    -- they belong under the central unit.
+    """
+    enable = Is3Entry(
+        name="_",
+        address=0x0102009F,
+        hw_id="Heat-Regulator_Enable-DIN_0189AB",
+        value=0,
+    )
+    assert is_controller_internal(enable)
+    assert not is_writable(enable)
+    assert is_binary(enable)  # read-only, not a switch
+    assert module_of(enable) is None  # under the CU3, no device of its own
 
 
 def test_controller_internals_are_matched_by_hardware_id(export) -> None:

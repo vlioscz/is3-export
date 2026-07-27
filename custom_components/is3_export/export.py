@@ -180,11 +180,15 @@ NUMBER_MAX = 2**31 - 1
 # Counters only ever climb, so they can drive Home Assistant's statistics.
 COUNTER = frozenset({(0x02, 0x06)})
 
-# Entries whose hardware id starts with this are internals of a heating
+# Entries whose hardware id starts with one of these are internals of a heating
 # controller, not devices.  They share address ranges with real outputs -- a
 # window detector sits among the relays, a control-type channel among the
-# dimmers -- so they are matched by hardware id and never written to.
+# dimmers -- so they are matched by hardware id and never written to.  Two blocks
+# qualify: the per-zone ``Controller_`` channels (a climate entity stands for
+# them) and the global ``Heat-Regulator_`` heat-source regulator.
 CONTROLLER_PREFIX = "Controller_"
+HEAT_REGULATOR_PREFIX = "Heat-Regulator_"
+_CONTROLLER_PREFIXES = (CONTROLLER_PREFIX, HEAT_REGULATOR_PREFIX)
 
 DIMMER_MIN = 0
 DIMMER_MAX = 100
@@ -201,14 +205,14 @@ def _class_of(entry: Is3Entry) -> tuple[int, int]:
 
 
 def is_controller_internal(entry: Is3Entry) -> bool:
-    """Whether the entry belongs to a heating controller rather than a device.
+    """Whether the entry belongs to a heating controller or regulator, not a device.
 
     Keyed on the hardware id, not on whether the installer named the entry.
     Plenty of real outputs go unnamed -- ``_ SA3-04M_RE2_0A0001`` is an ordinary
     relay -- so treating unnamed as read-only would strand them.
     """
     identity = entry.hw_id or entry.name
-    return identity.startswith(CONTROLLER_PREFIX)
+    return identity.startswith(_CONTROLLER_PREFIXES)
 
 
 def is_switchable(entry: Is3Entry) -> bool:
@@ -1095,11 +1099,12 @@ def module_of(entry: Is3Entry) -> tuple[str, str] | None:
 
     A hardware id reads ``<module>_<role>_<serial>``, so entries sharing a serial
     are channels of one physical module -- a wall switch, a relay board, a
-    dimmer -- and belong together under one device.  Two kinds stay on the
-    central unit itself: controller channels, which make up a heating zone the
-    climate entity already stands for, and the unit's own ``In-Out`` terminals,
-    of which there are few and often none in use.  System-level entries (system
-    bits and integers) have no module.
+    dimmer -- and belong together under one device.  Some stay on the central
+    unit itself: the heating controller and regulator blocks (``Controller_``
+    channels, which make up a heating zone the climate entity stands for, and the
+    global ``Heat-Regulator_``), and the unit's own ``In-Out`` terminals, of which
+    there are few and often none in use.  System-level entries (system bits and
+    integers) have no module.
     """
     hw_id = entry.hw_id
     if not hw_id:
@@ -1108,7 +1113,7 @@ def module_of(entry: Is3Entry) -> tuple[str, str] | None:
     if match is None:
         return None
     model = match["model"]
-    if model == "Controller" or model.startswith("In-Out"):
+    if model in ("Controller", "Heat-Regulator") or model.startswith("In-Out"):
         return None
     return model, match["serial"]
 

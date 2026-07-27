@@ -176,6 +176,11 @@ def test_module_of_skips_system_controller_and_unit_io() -> None:
         name="Int_osv", address=0x01050030, hw_id="In-Out-CU3-01M-CU3-02M_AIN1_0F0001"
     )
     assert module_of(unit_io) is None
+    # The global heat-source regulator is an internal block, not its own device.
+    regulator = Is3Entry(
+        name="_", address=0x0112003B, hw_id="Heat-Regulator_Actual-Therm-AIN_0189AB"
+    )
+    assert module_of(regulator) is None
 
 
 def test_each_switch_is_its_own_device_under_the_unit(export) -> None:
