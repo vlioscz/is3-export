@@ -606,8 +606,12 @@ def _pair_base_name(entry: Is3Entry) -> str:
     return match["rest"].lower()
 
 
-def _covers_from_relay_pairs(export: Is3Export) -> list[Is3Cover]:
-    """Assemble blinds from the up/down relay pairs of a blind driver."""
+def _covers_from_driver_channels(export: Is3Export) -> list[Is3Cover]:
+    """Assemble blinds from the Up/Down channels of a JA3 blind driver.
+
+    These carry the direction in the hardware id itself -- ``JA3-018M_Up1`` and
+    ``JA3-018M_Down1`` -- so they pair by the driver channel the two share.
+    """
     channels: dict[tuple[str, str, str], dict[str, Is3Entry]] = {}
 
     for entry in export.entries:
@@ -630,6 +634,85 @@ def _covers_from_relay_pairs(export: Is3Export) -> list[Is3Cover]:
 
         name = _strip_direction(up.name) if up.labelled else f"{model} {channel}"
         covers.append(Is3Cover(name=name, source="relay", open=up, close=down))
+    return covers
+
+
+# A blind is not always on a JA3 driver.  On a plain relay module (SA3, ...) the
+# installer wires two outputs to one motor, interlocks them in hardware, and puts
+# the direction in the entry *name* -- ``Roleta_loznice_UP`` / ``_DOWN`` -- while
+# the hardware id is a bare ``SA3-04M_RE3_0C0004``.  Both halves must share one
+# module, since that is where the interlock is wired, so the same base name reused
+# on another module is never mispaired.
+_NAME_DIRECTION = re.compile(r"^(?P<base>.+)_(?P<direction>UP|DOWN)$", re.IGNORECASE)
+
+
+def _name_direction(entry: Is3Entry) -> tuple[str, str] | None:
+    """Split a labelled ``<base>_UP`` / ``<base>_DOWN`` name into (base, up|down)."""
+    if not entry.labelled:
+        return None
+    match = _NAME_DIRECTION.match(entry.name)
+    if match is None:
+        return None
+    return match["base"], match["direction"].lower()
+
+
+def _strip_name_direction(name: str) -> str:
+    """``Roleta_loznice_UP`` -> ``Roleta_loznice``, keeping the original case."""
+    match = _NAME_DIRECTION.match(name)
+    return match["base"] if match else name
+
+
+def _covers_from_named_relay_pairs(
+    export: Is3Export, claimed: set[int]
+) -> list[Is3Cover]:
+    """Assemble blinds from relay pairs whose direction lives in the name.
+
+    Pairs a ``_UP`` output with the ``_DOWN`` output of the same base name on the
+    same physical module.  Relays already taken by a JA3 driver pairing are
+    skipped, so the two relay conventions never fight over one address.
+    """
+    groups: dict[tuple[str, str, str], dict[str, Is3Entry]] = {}
+
+    for entry in export.entries:
+        if entry.address in claimed or not is_switchable(entry):
+            continue
+        module = module_of(entry)
+        if module is None:
+            continue
+        parsed = _name_direction(entry)
+        if parsed is None:
+            continue
+        base, direction = parsed
+        key = (module[0], module[1], base.lower())
+        groups.setdefault(key, {})[direction] = entry
+
+    covers = []
+    for pair in groups.values():
+        if "up" not in pair or "down" not in pair:
+            continue
+        up, down = pair["up"], pair["down"]
+        covers.append(
+            Is3Cover(
+                name=_strip_name_direction(up.name),
+                source="relay",
+                open=up,
+                close=down,
+            )
+        )
+    return covers
+
+
+def _covers_from_relay_pairs(export: Is3Export) -> list[Is3Cover]:
+    """Assemble blinds driven directly by relay pairs.
+
+    Two wirings occur and both are taken: a JA3 blind driver whose channels are
+    named Up/Down in the hardware id, and a plain relay module (SA3, ...) where
+    the direction is in the entry name instead.  The driver channels are paired
+    first; the named pairs then fill in from the relays left over.
+    """
+    covers = _covers_from_driver_channels(export)
+    claimed = {address for cover in covers for address in cover.addresses}
+    covers.extend(_covers_from_named_relay_pairs(export, claimed))
     return covers
 
 

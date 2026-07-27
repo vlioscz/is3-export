@@ -14,10 +14,13 @@ is a request to that program, so driving a blind is one write and nothing here
 has to reason about relays.  This is the preferred source, and it is also the
 one that offers stop and tilt.
 
-**A relay pair on a JA3 driver.**  Here the contacts are driven directly: 1 runs
-the motor, 0 stops it, and the two directions are interlocked in hardware, so
-the opposite direction has to be released before reversing.  Used only when the
-export contains no blind program.
+**A relay pair driven directly.**  On a JA3 blind driver the two channels are
+named Up/Down in the hardware id; on a plain relay module (SA3, ...) two outputs
+are wired to one motor and the direction is in the entry name instead
+(``Roleta_loznice_UP`` / ``_DOWN``).  Either way the contacts are driven
+directly: 1 runs the motor, 0 stops it, and the two directions are interlocked
+in hardware, so the opposite direction has to be released before reversing.
+Stop releases both.  Used only when the export contains no blind program.
 
 Neither reports a position, so the covers carry an assumed state.  What they do
 report is direction: the relays hold their value while the motor runs, and the

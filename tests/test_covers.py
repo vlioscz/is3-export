@@ -200,6 +200,74 @@ def test_ordinary_relays_are_left_alone(relay_covers) -> None:
     assert 0x0102002B not in addresses
 
 
+# --- Relay pairs whose direction is in the name (SA modules, not JA) ---------
+#
+# A blind need not sit on a JA3 driver.  On a plain relay module two outputs are
+# wired to one motor and interlocked, and only the entry name says which way each
+# runs -- the hardware id is a bare `SA3-04M_RE3_<serial>`.  These are the blinds
+# on the real second installation (10.0.0.120).
+
+NAMED_RELAYS = """VERSION_01-03-03_ID_DEF_NAME_Named
+Roleta_loznice_UP SA3-04M_RE3_0C0004 0x01020021 0x00000000
+Roleta_loznice_DOWN SA3-04M_RE4_0C0004 0x01020022 0x00000000
+Roleta_koupelna_UP SA3-04M_RE1_0C0004 0x0102001F 0x00000000
+Roleta_koupelna_DOWN SA3-04M_RE2_0C0004 0x01020020 0x00000000
+Dvere_ter_UP SA3-04M_RE1_0C0005 0x0102001B 0x00000000
+Dvere_ter_DOWN SA3-04M_RE2_0C0005 0x0102001C 0x00000000
+Vent_koup_UP SA3-06M_RE3_0C0006 0x01020017 0x00000000
+Sv_koup SA3-06M_RE1_0C0006 0x01020015 0x00000000
+Half_UP SA3-04M_RE1_0AAAAA 0x010200E1 0x00000000
+Half_DOWN SA3-04M_RE1_0BBBBB 0x010200E2 0x00000000
+"""
+
+
+@pytest.fixture(name="named_covers")
+def named_covers_fixture():
+    """Blinds from a site whose relays carry the direction in the name."""
+    return {cover.name: cover for cover in find_covers(parse_export(NAMED_RELAYS))}
+
+
+def test_named_relay_pairs_become_blinds(named_covers) -> None:
+    """`Roleta_loznice_UP` and `_DOWN` on one module are one relay blind."""
+    cover = named_covers["Roleta_loznice"]
+    assert cover.source == "relay"
+    assert cover.open.address == 0x01020021
+    assert cover.close.address == 0x01020022
+    assert cover.stop is None  # stop comes from releasing both relays
+    assert not cover.has_tilt
+
+
+def test_two_named_blinds_on_one_module_stay_separate(named_covers) -> None:
+    """The base name, not the module, tells two blinds on one board apart."""
+    assert named_covers["Roleta_loznice"].open.address == 0x01020021
+    assert named_covers["Roleta_koupelna"].open.address == 0x0102001F
+    assert named_covers["Dvere_ter"].open.address == 0x0102001B
+
+
+def test_a_lone_direction_is_not_a_blind(named_covers) -> None:
+    """`_UP` with no matching `_DOWN` stays an ordinary switch."""
+    claimed = {a for c in named_covers.values() for a in c.addresses}
+    assert 0x01020017 not in claimed
+
+
+def test_a_plain_relay_is_left_alone(named_covers) -> None:
+    """A relay with no direction in its name is not swept into a blind."""
+    claimed = {a for c in named_covers.values() for a in c.addresses}
+    assert 0x01020015 not in claimed
+
+
+def test_a_name_reused_across_modules_is_not_paired(named_covers) -> None:
+    """The interlock is wired on one module, so the two halves must share it.
+
+    `Half_UP` and `Half_DOWN` share a base name but sit on different modules, so
+    pairing them would offer a blind whose directions cannot actually block each
+    other; they stay two switches instead.
+    """
+    claimed = {a for c in named_covers.values() for a in c.addresses}
+    assert 0x010200E1 not in claimed
+    assert 0x010200E2 not in claimed
+
+
 # --- Reversing --------------------------------------------------------------
 #
 # On a relay pair, 1 runs the motor and 0 stops it, but the two directions are
