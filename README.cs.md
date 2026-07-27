@@ -71,7 +71,7 @@ Ručně: zkopíruj `custom_components/is3_export` do `config/custom_components/`
 | Pole | Popis | Výchozí |
 | --- | --- | --- |
 | Host | IP adresa jednotky | — |
-| ASCII port | **z IDM3** (výchozí `1111`) | `1111` |
+| ASCII port | **z IDM3** | `22272` |
 | Export file path | nech prázdné, stáhne se z jednotky | prázdné |
 | Oddělovač | **z IDM3**, nabízí všech 27 možností | mezera `[32]` |
 | Číselná soustava | **z IDM3** | hexadecimální |

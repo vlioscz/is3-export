@@ -73,7 +73,7 @@ Manually: copy `custom_components/is3_export` into `config/custom_components/`.
 | Field | Description | Default |
 | --- | --- | --- |
 | Host | The unit's IP address | — |
-| ASCII port | **from IDM3** (default `1111`) | `1111` |
+| ASCII port | **from IDM3** | `22272` |
 | Export file path | leave empty, it downloads from the unit | empty |
 | Separator | **from IDM3**, offers all 27 options | space `[32]` |
 | Number base | **from IDM3** | hexadecimal |
