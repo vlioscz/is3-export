@@ -29,15 +29,21 @@ import logging
 import re
 from collections.abc import Callable
 
-from .const import BASE_HEX, CONNECT_TIMEOUT, DELIMITER_SPACE
+from .const import BASE_DEC, BASE_HEX, CONNECT_TIMEOUT, DELIMITER_SPACE
 
 _LOGGER = logging.getLogger(__name__)
 
 _ENCODING = "ascii"
 _EOL = b"\r\n"
 
-# Values are hex; anything else (N, ???) means the address has no value.
-_NUMBER = re.compile(r"^(0x[0-9A-Fa-f]+|\d+)$")
+# An 0x prefix always marks hex.  A bare token is read in the base the unit is
+# configured for: older IDM3 (seen on 3.3.34) sends hex *without* the prefix --
+# a bare 953 for 0x953 -- while 3.4.x adds it, so a bare value cannot be assumed
+# decimal.  Anything that is not a number in that base (N, ???) means the
+# address has no value.
+_HEX_PREFIXED = re.compile(r"^0x[0-9A-Fa-f]+$")
+_HEX_BARE = re.compile(r"^[0-9A-Fa-f]+$")
+_DECIMAL = re.compile(r"^\d+$")
 
 READ_TIMEOUT = 5.0
 # How long to wait between attempts to get a dropped connection back.
@@ -304,7 +310,7 @@ class Is3Client:
         if not line:
             return
 
-        parsed = parse_line(line, self._delimiter)
+        parsed = parse_line(line, self._delimiter, self._number_base)
         if parsed is None:
             _LOGGER.debug("Ignoring unrecognised line: %r", line)
             return
@@ -323,7 +329,9 @@ class Is3Client:
 
 
 def parse_line(
-    line: str, delimiter: str = DELIMITER_SPACE
+    line: str,
+    delimiter: str = DELIMITER_SPACE,
+    number_base: str = BASE_HEX,
 ) -> tuple[str, int, int | None] | None:
     """Split one line into (kind, address, value).
 
@@ -334,8 +342,9 @@ def parse_line(
       on the configured delimiter.  Only the configured one is used, because
       splitting on all of them would mangle a reply such as ``???`` from a
       failed sensor when ``?`` is the delimiter in use.
-    * **Either number base.** Hexadecimal values carry an ``0x`` prefix and
-      decimal ones do not, so the base is read off the value itself.
+    * **Either number base.** An ``0x`` prefix is always hex; a bare value is
+      read in ``number_base`` (the unit's configured base), because a unit set
+      to hexadecimal may send a bare ``953`` for ``0x953`` rather than decimal.
     * **Either mode.** "Remote control + IDM" puts an IDM field between the
       verb and the address; that is detected from the field count.
 
@@ -344,7 +353,8 @@ def parse_line(
         GET 0x0102000a 0x00000001   -> ("GET", 0x0102000A, 1)
         EVENT 15 0x01080001 0x1770  -> ("EVENT", 0x01080001, 6000)
         EVENT 0x01080001 0x1770     -> ("EVENT", 0x01080001, 6000)
-        GET 16908298 1              -> ("GET", 0x0102000A, 1)
+        GET 16908298 1        (dec) -> ("GET", 0x0102000A, 1)
+        GET 0x0102000a 953    (hex) -> ("GET", 0x0102000A, 0x953)
         GET 0x05010002 N            -> ("GET", 0x05010002, None)
     """
     fields = _split(line, delimiter)
@@ -360,11 +370,11 @@ def parse_line(
         # In "Remote control + IDM" mode an extra IDM field precedes the address.
         rest = rest[1:]
 
-    address = _parse_number(rest[0])
+    address = _parse_number(rest[0], number_base)
     if address is None:
         return None
 
-    value = _parse_number(rest[1]) if len(rest) > 1 else None
+    value = _parse_number(rest[1], number_base) if len(rest) > 1 else None
     return kind, address, value
 
 
@@ -376,12 +386,17 @@ def _split(line: str, delimiter: str) -> list[str]:
     return normalised.split()
 
 
-def _parse_number(field: str) -> int | None:
-    """Read a number in whichever base the unit is configured to send.
+def _parse_number(field: str, number_base: str = BASE_HEX) -> int | None:
+    """Read a number in the base the unit sends.
 
-    Values that are not numbers at all -- ``N`` for an address with no value,
-    ``???`` for a failed sensor -- come back as None.
+    An ``0x`` prefix always means hex.  A bare token is read in ``number_base``:
+    a unit set to hexadecimal may send ``953`` for ``0x953``, so assuming
+    decimal would misread it -- and would drop values whose hex form contains
+    a-f entirely.  Values that are not numbers at all -- ``N`` for an address
+    with no value, ``???`` for a failed sensor -- come back as None.
     """
-    if not _NUMBER.match(field):
-        return None
-    return int(field, 16) if field.lower().startswith("0x") else int(field)
+    if _HEX_PREFIXED.match(field):
+        return int(field, 16)
+    if number_base == BASE_HEX:
+        return int(field, 16) if _HEX_BARE.match(field) else None
+    return int(field) if _DECIMAL.match(field) else None

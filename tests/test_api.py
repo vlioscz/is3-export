@@ -11,6 +11,7 @@ import pytest
 from custom_components.is3_export.api import Is3Client, parse_line
 from custom_components.is3_export.const import (
     BASE_DEC,
+    BASE_HEX,
     DELIMITER_SEMICOLON,
     DELIMITER_SPACE,
     DELIMITERS,
@@ -84,17 +85,25 @@ def test_both_modes_are_understood(line: str, expected) -> None:
 
 
 @pytest.mark.parametrize(
-    ("line", "expected"),
+    ("line", "number_base", "expected"),
     [
-        # IDM3's number base can be switched from hexadecimal to decimal.
-        ("GET 0x0102000a 0x00000001", ("GET", 0x0102000A, 1)),
-        ("GET 16908298 1", ("GET", 0x0102000A, 1)),
-        ("EVENT 15 16908289 4549", ("EVENT", 0x01020001, 4549)),
+        # An 0x prefix is hex whatever the configured base is.
+        ("GET 0x0102000a 0x00000001", BASE_HEX, ("GET", 0x0102000A, 1)),
+        ("GET 0x0102000a 0x00000001", BASE_DEC, ("GET", 0x0102000A, 1)),
+        # A decimal unit sends bare decimal.
+        ("GET 16908298 1", BASE_DEC, ("GET", 0x0102000A, 1)),
+        ("EVENT 15 16908289 4549", BASE_DEC, ("EVENT", 0x01020001, 4549)),
+        # Older IDM3 (3.3.34) sends bare hex, no 0x: 953 is 0x953, and a value
+        # whose hex form has a-f (96c) must not be dropped as unparseable --
+        # that was the bug that showed a 23.87 C zone as 9.53 C and blanked a
+        # 24.12 C (0x96c) one.
+        ("GET 0x0102000a 953", BASE_HEX, ("GET", 0x0102000A, 0x953)),
+        ("GET 0x0102000a 96c", BASE_HEX, ("GET", 0x0102000A, 0x96C)),
     ],
 )
-def test_both_number_bases_are_understood(line: str, expected) -> None:
-    """Hexadecimal values carry an 0x prefix; decimal ones do not."""
-    assert parse_line(line) == expected
+def test_number_base_is_respected_for_bare_values(line, number_base, expected) -> None:
+    """0x is always hex; a bare value is read in the unit's configured base."""
+    assert parse_line(line, number_base=number_base) == expected
 
 
 @pytest.mark.parametrize("delimiter", list(DELIMITERS))
@@ -225,3 +234,28 @@ def test_event_and_reply_for_the_same_address_are_distinguished() -> None:
     assert reply[0] == "GET"
     assert event[0] == "EVENT"
     assert reply[1] == event[1] == 0x01080001
+
+
+def test_client_reads_bare_values_in_its_configured_base() -> None:
+    """The client passes its own number base to the parser.
+
+    A hex-configured client reads a prefix-less ``953`` as ``0x953`` (2387,
+    i.e. 23.87 C), not decimal 953 -- the fault on an older IDM3 unit that
+    sends hex without the 0x prefix.
+    """
+    hex_seen: list[tuple[int, int]] = []
+    hex_client = Is3Client(
+        "192.168.1.10", 1111, on_event=lambda a, v: hex_seen.append((a, v))
+    )  # number base defaults to hex
+    hex_client._handle_line("EVENT 0x01080007 953")
+    assert hex_seen == [(0x01080007, 2387)]
+
+    dec_seen: list[tuple[int, int]] = []
+    dec_client = Is3Client(
+        "192.168.1.10",
+        1111,
+        number_base=BASE_DEC,
+        on_event=lambda a, v: dec_seen.append((a, v)),
+    )
+    dec_client._handle_line("EVENT 17301511 2387")  # 17301511 == 0x01080007
+    assert dec_seen == [(0x01080007, 2387)]
