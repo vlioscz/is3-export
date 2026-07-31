@@ -8,6 +8,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
+    LIGHT_LUX,
     PERCENTAGE,
     UnitOfElectricPotential,
     UnitOfEnergy,
@@ -24,6 +25,7 @@ from .export import (
     Is3Entry,
     effective_unit,
     is_counter,
+    is_illuminance,
     platform_of,
     value_scale,
 )
@@ -115,6 +117,11 @@ class Is3Sensor(Is3Entity, SensorEntity):
                 self._attr_native_unit_of_measurement, self._attr_device_class = metric
             elif (unit := effective_unit(entry)) is not None:
                 self._attr_native_unit_of_measurement = unit
+        elif is_illuminance(entry):
+            # A light-intensity input reads lux; without this it would be a bare
+            # number, since the export gives it no unit.
+            self._attr_device_class = SensorDeviceClass.ILLUMINANCE
+            self._attr_native_unit_of_measurement = LIGHT_LUX
         elif (reading_unit := effective_unit(entry)) is not None:
             unit, device_class = UNITS.get(reading_unit, (reading_unit, None))
             self._attr_native_unit_of_measurement = unit

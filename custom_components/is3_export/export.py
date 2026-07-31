@@ -183,12 +183,19 @@ COUNTER = frozenset({(0x02, 0x06)})
 # Entries whose hardware id starts with one of these are internals of a heating
 # controller, not devices.  They share address ranges with real outputs -- a
 # window detector sits among the relays, a control-type channel among the
-# dimmers -- so they are matched by hardware id and never written to.  Two blocks
-# qualify: the per-zone ``Controller_`` channels (a climate entity stands for
-# them) and the global ``Heat-Regulator_`` heat-source regulator.
+# dimmers -- so they are matched by hardware id and never written to.  Three
+# blocks qualify: the per-zone ``Controller_`` channels (a climate entity stands
+# for them) and the global ``Heat-Regulator_`` and ``Cool-Regulator_`` source
+# regulators.  Cooling mirrors heating, so its regulator is internal in exactly
+# the same way -- otherwise its Enable/Status channels leak out as writable.
 CONTROLLER_PREFIX = "Controller_"
 HEAT_REGULATOR_PREFIX = "Heat-Regulator_"
-_CONTROLLER_PREFIXES = (CONTROLLER_PREFIX, HEAT_REGULATOR_PREFIX)
+COOL_REGULATOR_PREFIX = "Cool-Regulator_"
+_CONTROLLER_PREFIXES = (
+    CONTROLLER_PREFIX,
+    HEAT_REGULATOR_PREFIX,
+    COOL_REGULATOR_PREFIX,
+)
 
 DIMMER_MIN = 0
 DIMMER_MAX = 100
@@ -259,6 +266,18 @@ def is_measured(entry: Is3Entry) -> bool:
 def is_counter(entry: Is3Entry) -> bool:
     """Whether the entry is a meter reading that only ever increases."""
     return _class_of(entry) in COUNTER
+
+
+def is_illuminance(entry: Is3Entry) -> bool:
+    """Whether the entry is a light-intensity (lux) input.
+
+    An analog input whose channel role is ``Light-IN`` -- the DLS3 light sensor,
+    and any other module exposing the same role.  It reads illuminance, so it is
+    given the lux unit and device class rather than left a bare number.
+    """
+    if _class_of(entry) != (0x01, 0x08):
+        return False
+    return "light-in" in (entry.hw_id or entry.name).lower()
 
 
 # --- Naming conventions -----------------------------------------------------
