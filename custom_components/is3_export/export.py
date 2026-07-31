@@ -839,6 +839,21 @@ class Is3Controller:
                 addresses.append(optional)
         return addresses
 
+    @property
+    def temperature_addresses(self) -> list[int]:
+        """The computed temperature outputs, which may never push an event.
+
+        The controller derives these; on some units they are not emitted as
+        change events, so a value read once at startup would then freeze (a warm
+        room still showing its cold-morning reading).  They are re-read
+        periodically to self-heal -- kept apart from :attr:`read_addresses` so
+        that refresh stays a handful of addresses, not the whole zone.
+        """
+        addresses = [self.actual, self.required]
+        if self.cool_required is not None:
+            addresses.append(self.cool_required)
+        return addresses
+
 
 # Every controller carries the cool channels, whether or not a cooling output is
 # wired to the zone -- so their presence cannot say if the zone can cool.  What

@@ -37,5 +37,9 @@ jobs:
           cache: pip
           # The default cache lookup only matches requirements.txt.
           cache-dependency-path: requirements-test.txt
+      # Block any commit that reintroduces a token that leaked once (a real
+      # address, serial or owner name) -- e.g. from a stale clone. Stdlib only.
+      - name: PII guard
+        run: python tools/check_pii.py
       - run: pip install -r requirements-test.txt
       - run: pytest tests -v

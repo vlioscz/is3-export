@@ -28,6 +28,7 @@ from .const import DEFAULT_SCAN_INTERVAL, DOMAIN, EXPORT_RELOAD_INTERVAL
 from .export import (
     PLATFORM_SENSOR,
     Is3Export,
+    find_controllers,
     is_press_button,
     is_readable,
     platform_of,
@@ -72,6 +73,13 @@ NOTIFY_THROTTLE = 1.0
 # no-value address is retried only this many times, then left to the event
 # stream; one that does answer drops out of the retry set at once.
 MAX_SEED_ATTEMPTS = 3
+
+# Climate temperatures are computed controller outputs that some units never
+# send as change events (seen on older IDM3); a value read once at startup would
+# then freeze.  A small rotating batch of them is re-read each scan to self-heal
+# -- kept tiny so it never becomes the GET burst that once delayed button
+# presses.  Units with no heating zones refresh nothing.
+STALE_REFRESH_BATCH = 6
 
 
 @dataclass(slots=True)
@@ -137,6 +145,9 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         # address -> times it was read and answered no value; capped so a
         # permanently-"N" address stops being re-read every scan (see below).
         self._seed_attempts: dict[int, int] = {}
+        # Temperature channels re-read on rotation so a stuck value self-heals.
+        self._refresh_addresses: list[int] = []
+        self._refresh_cursor = 0
         # Per-relay-blind travel time in seconds, keyed by the cover's open
         # address.  Owned by the travel-time Number entities, read by the covers
         # to time an auto-stop and to scale their position estimate.
@@ -356,6 +367,13 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         self._momentary = frozenset(
             entry.address for entry in export.entries if is_press_button(entry)
         )
+        # Temperature channels re-read on rotation (see STALE_REFRESH_BATCH):
+        # computed controller outputs that some units never push as events.
+        self._refresh_addresses = [
+            address
+            for controller in find_controllers(export)
+            for address in controller.temperature_addresses
+        ]
 
         if not self.reads_supported:
             if not self._seeded:
@@ -384,6 +402,10 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         if unread:
             await self._async_seed(unread[:INITIAL_READ_LIMIT])
             self._seeded = True
+
+        # Re-read a rotating slice of the temperature channels so a zone whose
+        # change events are not configured still catches up over a few cycles.
+        await self._async_refresh(self._next_refresh_batch())
 
         return Is3Data(export=export, values=dict(self._values))
 
@@ -415,6 +437,39 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
                 continue
 
             self._async_store(key, value)
+
+    def _next_refresh_batch(self) -> list[int]:
+        """The next rotating slice of the temperature channels to re-read."""
+        addresses = self._refresh_addresses
+        if not addresses:
+            return []
+        start = self._refresh_cursor % len(addresses)
+        batch = addresses[start : start + STALE_REFRESH_BATCH]
+        if (shortfall := STALE_REFRESH_BATCH - len(batch)) > 0:
+            batch += addresses[:shortfall]  # wrap around to the start
+        self._refresh_cursor = (start + STALE_REFRESH_BATCH) % len(addresses)
+        return batch
+
+    async def _async_refresh(self, addresses: list[int]) -> None:
+        """Re-read addresses that may have frozen, storing any change.
+
+        Unlike seeding, these already have a value; they are read again because a
+        channel that stopped sending change events would otherwise stay at its
+        last reading.  A value that changed while the read was in flight is kept
+        as the newer one, the same as when seeding; a read error is skipped
+        rather than failing the whole cycle, since this is best-effort.
+        """
+        for address in addresses:
+            asked_at = self.hass.loop.time()
+            try:
+                value = await self.client.async_get(f"0x{address:08X}")
+            except Is3Error:
+                continue
+            if value is None:
+                continue
+            if self._updated_at.get(address, 0.0) > asked_at:
+                continue
+            self._async_store(address, value)
 
     async def _async_read_export(self) -> Is3Export:
         """Get the export, re-reading it only once it has gone stale.

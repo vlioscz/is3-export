@@ -48,9 +48,11 @@ Nakonec **Uložit do CU**.
 Na těchhle zaškrtávátkách závisí, jak rychle se stav objeví v Home Assistantu.
 Jednotku ovládají i vypínače na zdech, takže změna nemusí přijít z HA — a pozná
 ji jen z události. **Co má vlastní událost, aktualizuje se řádově do sekundy;
-co ne, až při pravidelném dočítání (30 s).** To kolísání u změn ze zdi
-(hned vs. 2–3 s) je zpoždění samotné jednotky, než změnu na ASCII odešle, ne
-integrace.
+co ne, zůstane na poslední známé hodnotě, dokud se zase nezmění** — s jednou
+výjimkou: **teplota topné zóny** se dočítá na pomalé rotaci, takže zóna, které
+nejsou zaškrtnuté teplotní události, se dorovná místo toho, aby zamrzla na
+hodnotě ze startu. To kolísání u změn ze zdi (hned vs. 2–3 s) je zpoždění
+samotné jednotky, než změnu na ASCII odešle, ne integrace.
 
 Vlastní příkazy z HA se zobrazí okamžitě a integrace je pak **ověří zpětným
 čtením** — když se výstup neuchytil nebo ho mezitím přehodil vypínač na zdi,

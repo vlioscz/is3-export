@@ -49,9 +49,12 @@ Finally, **Save to CU**.
 How fast state shows up in Home Assistant depends on these checkboxes. The unit
 is also driven by switches on the walls, so a change need not come from HA — and
 it's only detected from an event. **What has its own event updates within a
-second or so; what doesn't, only on the periodic re-read (30 s).** The
-variability with changes from the wall (instant vs. 2–3 s) is the unit's own
-delay before it sends the change over ASCII, not the integration's.
+second or so; what doesn't stays at its last known value until it changes
+again** — with one exception: a **heating zone's temperature** is re-read on a
+slow rotation, so a zone whose temperature events aren't ticked still catches up
+instead of freezing at its startup reading. The variability with changes from
+the wall (instant vs. 2–3 s) is the unit's own delay before it sends the change
+over ASCII, not the integration's.
 
 Commands from HA itself show up immediately, and the integration then **verifies
 them by reading back** — if the output didn't take, or a switch on the wall
