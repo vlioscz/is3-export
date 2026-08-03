@@ -405,7 +405,7 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
 
         # Re-read a rotating slice of the temperature channels so a zone whose
         # change events are not configured still catches up over a few cycles.
-        await self._async_refresh(self._next_refresh_batch())
+        await self._async_refresh_stale(self._next_refresh_batch())
 
         return Is3Data(export=export, values=dict(self._values))
 
@@ -450,8 +450,13 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         self._refresh_cursor = (start + STALE_REFRESH_BATCH) % len(addresses)
         return batch
 
-    async def _async_refresh(self, addresses: list[int]) -> None:
+    async def _async_refresh_stale(self, addresses: list[int]) -> None:
         """Re-read addresses that may have frozen, storing any change.
+
+        NB: must NOT be named ``_async_refresh`` -- that is the base
+        DataUpdateCoordinator's own method, which HA calls with
+        ``log_failures=...``; shadowing it breaks setup (it did, in 0.1.6).
+
 
         Unlike seeding, these already have a value; they are read again because a
         channel that stopped sending change events would otherwise stay at its

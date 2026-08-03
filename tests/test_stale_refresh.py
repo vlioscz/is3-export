@@ -13,11 +13,24 @@ from __future__ import annotations
 import asyncio
 
 from custom_components.is3_export.api import Is3ConnectionError
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
 from custom_components.is3_export.coordinator import (
     STALE_REFRESH_BATCH,
     Is3Coordinator,
 )
 from custom_components.is3_export.export import Is3Controller
+
+
+def test_does_not_shadow_the_base_coordinator_refresh() -> None:
+    """The stale re-read must not be named ``_async_refresh``.
+
+    That is the base DataUpdateCoordinator's own method, which HA calls with
+    ``log_failures=...`` during setup; shadowing it raised a TypeError and broke
+    setup entirely in 0.1.6.  Guard against re-introducing the collision.
+    """
+    assert Is3Coordinator._async_refresh is DataUpdateCoordinator._async_refresh
+    assert hasattr(Is3Coordinator, "_async_refresh_stale")
 
 ACTUAL = 0x01080007
 REQUIRED = 0x01080008
@@ -108,7 +121,7 @@ def test_refresh_heals_a_frozen_temperature() -> None:
     client = _Client({"0x01080007": 2387})  # unit now reports 23.87 C
     coord = _refresh_coord(client, {ACTUAL: 950})  # HA frozen at 9.50 C
 
-    asyncio.run(coord._async_refresh([ACTUAL]))
+    asyncio.run(coord._async_refresh_stale([ACTUAL]))
 
     assert client.reads == ["0x01080007"]
     assert coord.values[ACTUAL] == 2387
@@ -119,6 +132,6 @@ def test_refresh_ignores_a_read_error() -> None:
     client = _Client(error=True)
     coord = _refresh_coord(client, {ACTUAL: 950})
 
-    asyncio.run(coord._async_refresh([ACTUAL]))
+    asyncio.run(coord._async_refresh_stale([ACTUAL]))
 
     assert coord.values[ACTUAL] == 950  # unchanged, no exception
