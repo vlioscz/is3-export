@@ -16,9 +16,9 @@ jednotkou přímo, **nepotřebuje Connection Server**.
 Seznam zařízení si stáhne z exportu, který jednotka sama servíruje. Stav
 sleduje živě: jednotka posílá změny sama, takže se nic nepolluje.
 
-> **Stav: experimentální.** Protokol je ověřený proti živé jednotce, parser
-> proti exportům ze sedmi instalací (17 až 1125 položek, IDM3 03-03-34 až
-> 03-05-03). Neověřené zůstávají žaluzie na reálném pohonu — viz
+> **Stav: experimentální.** Protokol je ověřený proti živým jednotkám, parser
+> proti exportům z několika instalací (17 až 1125 položek, IDM3 03-03-34 až
+> 03-05-03). Rolety hlásí **odhadovaný stav** — bez zpětné vazby o poloze; viz
 > [Omezení](#omezení).
 
 ## ❗ Nejdřív povol protokol v IDM3
@@ -29,7 +29,7 @@ V **iNELS IDM3** → *Konfigurace centrální jednotky* → **Third part setting
 
 | Položka | Co s ní |
 | --- | --- |
-| **Port** | Zvol volný port. Žádný výchozí neexistuje, poznamenej si ho. |
+| **Port** | Výchozí **22272** na novějším IDM3 (starší jednotky měly **1111**); je konfigurovatelný, poznamenej si svůj. |
 | **Oddělovač** | Musí souhlasit s nastavením integrace. `[32]` je mezera. |
 | **Číselná soustava** | Musí souhlasit s nastavením integrace. |
 | **Režim** | Vzdálenné ovládání + IDM |
@@ -60,9 +60,12 @@ oprav se stav na skutečnost místo aby ikona zůstala viset ve špatném stavu.
 
 ## Instalace
 
+Je v **HACS default store**: otevři **HACS**, vyhledej **IS3 Export** a dej
+**Download** — nebo použij tohle tlačítko na jedno kliknutí:
+
 [![Přidat repozitář do HACS][hacs-badge-btn]][hacs-add]
 
-Pak **Download**, restart Home Assistanta a:
+Pak **restartuj Home Assistant** a přidej integraci:
 
 [![Přidat integraci][config-badge]][config-add]
 
@@ -76,7 +79,7 @@ Ručně: zkopíruj `custom_components/is3_export` do `config/custom_components/`
 | ASCII port | **z IDM3** | `22272` |
 | Export file path | nech prázdné, stáhne se z jednotky | prázdné |
 | Oddělovač | **z IDM3**, nabízí všech 27 možností | mezera `[32]` |
-| Číselná soustava | **z IDM3** | hexadecimální |
+| Číselná soustava | **z IDM3** — hodnoty se čtou v této soustavě (starší jednotky posílají hex bez prefixu `0x`, takže musí sedět) | hexadecimální |
 
 Název integrace se vezme z hlavičky exportu.
 
@@ -112,7 +115,7 @@ Druhý bajt adresy určuje typ:
 | `0x01`**`01`** | vstupy, tlačítka, stavové výstupy regulátoru | `binary_sensor` | ❌ |
 | `0x01`**`07`** | poruchy modulů | `binary_sensor` (problem) | ❌ |
 | `0x01`**`05`** | teplota / vlhkost | `sensor` | ❌ |
-| `0x01`**`08`** | analogový vstup | `sensor` | ❌ |
+| `0x01`**`08`** | analogový vstup (vstup `Light-IN` = osvětlení / lux) | `sensor` | ❌ |
 | `0x01`**`03`**, `0x01`**`11`**, `0x01`**`12`** | kanály regulátorů | `sensor` | ❌ |
 | `0x02`**`06`** | vodoměry, elektroměry | `sensor` (total) | ❌ |
 | `0x05`**`01`**, `0x02`**`04`**, `0x02`**`09`**, `0x0003` | plány, skupiny, rozvrhy | — | ❌ |
@@ -120,9 +123,10 @@ Druhý bajt adresy určuje typ:
 Zapisuje se **jen tam, kde je zápis doložený**. Do vstupů, termostatických
 kanálů ani plánů nikdy.
 
-Rozhoduje **hardwarové ID**, ne jméno: co začíná na `Controller_`, je vnitřnost
-regulátoru a nezapisuje se do toho — okenní čidlo sedí ve stejném rozsahu jako
-relé. Naopak nepojmenované relé (`_ SA3-04M_RE2_…`) je pořád relé.
+Rozhoduje **hardwarové ID**, ne jméno: co začíná na `Controller_`,
+`Heat-Regulator_` nebo `Cool-Regulator_`, je vnitřnost regulátoru a nezapisuje
+se do toho — okenní čidlo sedí ve stejném rozsahu jako relé. Naopak
+nepojmenované relé (`_ SA3-04M_RE2_…`) je pořád relé.
 
 ### Názvy zpřesňují typ entity
 
@@ -169,14 +173,27 @@ ikonu ručně v Home Assistantu.
 
 ### Žaluzie
 
-Skládají se z několika adres do jedné entity `cover`, ze dvou možných zdrojů:
+Skládají se z několika adres do jedné entity `cover`, ze tří možných zdrojů:
 
-1. **Systémové bity programu žaluzií** — nahoru, dolů, stop, naklápění. Program
-   v jednotce si řídí kontakty sám. Má přednost.
-2. **Dvojice relé JA3** — jen nahoru a dolů, stop uvolněním obou. Použije se,
-   jen když program v exportu není.
+1. **Systémové bity programu žaluzií** (`0x0203`) — nahoru, dolů, stop,
+   naklápění. Program v jednotce si řídí kontakty a sám žaluzii zastaví.
+   Preferováno, když existuje.
+2. **Dvojice relé JA3** — směr je v hardwarovém ID (`JA3-018M_Up1` / `Down1`),
+   stop uvolněním obou.
+3. **Obyčejná dvojice relé** (modul `SA3`, i BOX varianta `SA3-02B`) — dva relé
+   na jeden motor, hardwarově blokované. Tady je směr v **názvu**, ne v
+   hardwarovém ID: token `UP`/`DOWN` **kdekoliv** v názvu — jako přípona
+   (`Roleta_loznice_UP`) i uprostřed (`…_UP_…`) — spáruje obě poloviny na
+   **stejném modulu**.
 
-Adresy, které si vezme žaluzie, už nevzniknou jako spínače.
+Holé relé se samo nerozepne, takže **relé roleta (forma 3)** dostane
+**travel-time** entitu `number` (výchozí 30 s): po pohybu integrace relé po té
+době rozepne, tak ji **nastav na reálnou dobu chodu** rolety (o chlup víc), ať
+dojede na doraz dřív. Reverz nejdřív uvolní opačný směr, chvíli počká a pak
+zabere — modul směry hardwarově blokuje.
+
+Poloha se nehlásí, takže cover nese **odhadovaný stav**. Adresy, které si vezme
+žaluzie, už nevzniknou jako spínače.
 
 ### Topné zóny
 
@@ -317,8 +334,9 @@ zařízení a od internetu.
 
 ## Omezení
 
-- **Žaluzie nejsou ověřené na reálném pohonu.** U relé varianty se předpokládá,
-  že `1` motor rozjede a `0` zastaví; pauza při obracení chodu je odhad.
+- **Rolety nehlásí polohu.** Cover ukazuje odhadovaný stav
+  (otevřeno / zavřeno / v pohybu), ne procenta; doraz relé rolety se odvozuje
+  z nastavené doby chodu, neměří se.
 - **Scény se nedají spouštět** — `GET` na ně vrací `N`, zápis neověřený.
 - **Binární formáty `.otc` / `.cld` se nečtou.** Obsahují navíc pojmenované scény.
 - **HTTP i ASCII port jdou bez šifrování.**
@@ -348,8 +366,13 @@ když je připojený i Connection Server.
 
 ## Diagnostika
 
-Když něco nesedí, tenhle skript zjistí, co jednotka umí — je read-only, dokud
-nepřidáš `--write`:
+**Stáhni diagnostiku** z integrace (menu **⋮**) — redigovaný snímek: konfigurace,
+schopnosti jednotky a každá položka s živou hodnotou a tím, jak se klasifikovala.
+Nejrychlejší věc k přiložení k bug reportu; host a případné přihlašovací údaje
+jsou začerněné.
+
+Na hlubší oťukání je read-only skript, který zjistí, co ASCII port jednotky umí
+(přidáš-li `--write`, pošle i SET):
 
 ```bash
 python tools/probe_is3.py <ip> <port> 0x0102000A
@@ -371,7 +394,7 @@ cestu existuje [InelsForHass](https://github.com/JH-Soft-Technology/InelsForHass
 [MIT](LICENSE)
 
 [hacs]: https://github.com/hacs/integration
-[hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
+[hacs-badge]: https://img.shields.io/badge/HACS-Default-41BDF5.svg
 
 <!-- My Home Assistant redirects: these resolve against whatever instance the
      reader is signed in to, so no address of anyone's Home Assistant appears

@@ -16,10 +16,10 @@ unit directly and **needs no Connection Server**.
 It downloads the device list from the export the unit serves itself. It tracks
 state live: the unit pushes changes on its own, so nothing is polled.
 
-> **Status: experimental.** The protocol is verified against a live unit, the
-> parser against exports from seven installations (17 to 1125 items, IDM3
-> 03-03-34 through 03-05-03). Blinds on a real drive remain unverified — see
-> [Limitations](#limitations).
+> **Status: experimental.** The protocol is verified against live units, the
+> parser against exports from several installations (17 to 1125 items, IDM3
+> 03-03-34 through 03-05-03). Covers report an **assumed state** — no position
+> feedback; see [Limitations](#limitations).
 
 ## ❗ First enable the protocol in IDM3
 
@@ -29,7 +29,7 @@ In **iNELS IDM3** → *Central unit configuration* → **Third part setting**:
 
 | Item | What to do |
 | --- | --- |
-| **Port** | Pick a free port. There's no default, so write it down. |
+| **Port** | Default **22272** on recent IDM3 (older units used **1111**); it's configurable, so note yours. |
 | **Separator** | Must match the integration's setting. `[32]` is a space. |
 | **Number base** | Must match the integration's setting. |
 | **Mode** | Remote control + IDM |
@@ -63,9 +63,12 @@ leaving the icon stuck in the wrong state.
 
 ## Installation
 
+It's in the **HACS default store**: open **HACS**, search **IS3 Export**, and
+**Download** it — or use this one-click button:
+
 [![Add repository to HACS][hacs-badge-btn]][hacs-add]
 
-Then **Download**, restart Home Assistant, and:
+Then **restart Home Assistant** and add the integration:
 
 [![Add integration][config-badge]][config-add]
 
@@ -79,7 +82,7 @@ Manually: copy `custom_components/is3_export` into `config/custom_components/`.
 | ASCII port | **from IDM3** | `22272` |
 | Export file path | leave empty, it downloads from the unit | empty |
 | Separator | **from IDM3**, offers all 27 options | space `[32]` |
-| Number base | **from IDM3** | hexadecimal |
+| Number base | **from IDM3** — values are read in this base (older units send hex without the `0x` prefix, so it must match) | hexadecimal |
 
 The integration's name is taken from the export header.
 
@@ -115,7 +118,7 @@ The second byte of the address determines the type:
 | `0x01`**`01`** | inputs, buttons, controller status outputs | `binary_sensor` | ❌ |
 | `0x01`**`07`** | module faults | `binary_sensor` (problem) | ❌ |
 | `0x01`**`05`** | temperature / humidity | `sensor` | ❌ |
-| `0x01`**`08`** | analog input | `sensor` | ❌ |
+| `0x01`**`08`** | analog input (a `Light-IN` input reads illuminance / lux) | `sensor` | ❌ |
 | `0x01`**`03`**, `0x01`**`11`**, `0x01`**`12`** | controller channels | `sensor` | ❌ |
 | `0x02`**`06`** | water meters, electricity meters | `sensor` (total) | ❌ |
 | `0x05`**`01`**, `0x02`**`04`**, `0x02`**`09`**, `0x0003` | plans, groups, schedules | — | ❌ |
@@ -123,10 +126,10 @@ The second byte of the address determines the type:
 Writes happen **only where a write is documented**. Never to inputs, thermostat
 channels, or plans.
 
-The **hardware ID** decides, not the name: anything starting with `Controller_`
-is controller internals and is not written to — a window sensor sits in the same
-range as a relay. Conversely, an unnamed relay (`_ SA3-04M_RE2_…`) is still a
-relay.
+The **hardware ID** decides, not the name: anything starting with `Controller_`,
+`Heat-Regulator_` or `Cool-Regulator_` is controller/regulator internals and is
+not written to — a window sensor sits in the same range as a relay. Conversely,
+an unnamed relay (`_ SA3-04M_RE2_…`) is still a relay.
 
 ### Names refine the entity type
 
@@ -172,15 +175,29 @@ override the entity type or icon manually in Home Assistant.
 
 ### Blinds
 
-They combine several addresses into one `cover` entity, from two possible
+They combine several addresses into one `cover` entity, from three possible
 sources:
 
-1. **System bits of the blind program** — up, down, stop, tilt. The program in
-   the unit drives the contacts itself. It takes priority.
-2. **A pair of JA3 relays** — only up and down, stop by releasing both. Used
-   only when there's no program in the export.
+1. **System bits of the blind program** (`0x0203`) — up, down, stop, tilt. The
+   program in the unit drives the contacts and stops the blind itself. Preferred
+   where present.
+2. **A pair of JA3 relays** — direction is in the hardware ID
+   (`JA3-018M_Up1` / `Down1`); stop by releasing both.
+3. **A plain relay pair** (an `SA3` module, including the `SA3-02B` box) — two
+   relays on one motor, interlocked in hardware. Here the direction is in the
+   **name**, not the hardware ID: an `UP`/`DOWN` token anywhere in the name — a
+   suffix (`Roleta_loznice_UP`) or in the middle (`…_UP_…`) — pairs the two
+   halves that share **the same module**.
 
-Addresses taken by a blind no longer appear as switches.
+A bare relay won't release itself, so a **relay blind (form 3)** gets a
+**travel-time** `number` entity (default 30 s): after a move the integration
+releases the relay once that time elapses, so **set it to the blind's real run
+time** (a touch more) and it reaches the end stop first. Reversing first releases
+the opposite direction, waits briefly, then drives — the module interlocks the
+two directions in hardware.
+
+Neither reports its position, so a cover carries an **assumed state**. Addresses
+taken by a blind no longer appear as switches.
 
 ### Heating zones
 
@@ -333,9 +350,9 @@ devices and from the internet.
 
 ## Limitations
 
-- **Blinds are not verified on a real drive.** For the relay variant, it's
-  assumed that `1` starts the motor and `0` stops it; the pause when reversing
-  direction is a guess.
+- **Covers report no position.** A cover shows an assumed state
+  (open / closed / moving), not a percentage; a relay blind's end stop is
+  inferred from the configured travel time, not measured.
 - **Scenes can't be triggered** — a `GET` on them returns `N`, and writing is unverified.
 - **The binary `.otc` / `.cld` formats are not read.** They additionally contain named scenes.
 - **Both the HTTP and ASCII ports run without encryption.**
@@ -365,8 +382,13 @@ only when the Connection Server is also connected.
 
 ## Diagnostics
 
-When something's off, this script finds out what the unit can do — it's
-read-only until you add `--write`:
+**Download diagnostics** from the integration (its **⋮** menu) for a redacted
+snapshot — the config, the unit's capabilities, and every entry with its live
+value and how it was classified. It's the quickest thing to attach to a bug
+report; the host and any credentials are masked.
+
+For lower-level probing, a read-only script reports what the unit's ASCII port
+supports (add `--write` to also send a SET):
 
 ```bash
 python tools/probe_is3.py <ip> <port> 0x0102000A
@@ -389,7 +411,7 @@ The unit also speaks other protocols the integration doesn't work with:
 [MIT](LICENSE)
 
 [hacs]: https://github.com/hacs/integration
-[hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
+[hacs-badge]: https://img.shields.io/badge/HACS-Default-41BDF5.svg
 
 <!-- My Home Assistant redirects: these resolve against whatever instance the
      reader is signed in to, so no address of anyone's Home Assistant appears
