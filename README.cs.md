@@ -394,6 +394,9 @@ pip install -r requirements-test.txt
 pytest
 ```
 
+Na Windows si nejdřív přečti [CONTRIBUTING.md](CONTRIBUTING.md) — ušetří
+odpoledne (Python 3.13, krátká cesta k venv a trik s wheelem `lru-dict`).
+
 Jednotka mluví i jinými protokoly, se kterými integrace nepracuje: **ELKONET**
 (binární, port 9999) a **XML-RPC** na Connection Serveru (port 7801) — pro tu
 cestu existuje [InelsForHass](https://github.com/JH-Soft-Technology/InelsForHass).

@@ -410,6 +410,9 @@ pip install -r requirements-test.txt
 pytest
 ```
 
+On Windows read [CONTRIBUTING.md](CONTRIBUTING.md) first — it saves an
+afternoon (Python 3.13, a short venv path, and an `lru-dict` wheel trick).
+
 The unit also speaks other protocols the integration doesn't work with:
 **ELKONET** (binary, port 9999) and **XML-RPC** on the Connection Server
 (port 7801) — for that route there's
