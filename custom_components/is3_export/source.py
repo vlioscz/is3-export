@@ -110,6 +110,11 @@ async def _async_fetch_with_digest(
         return await response.read()
 
 
+def parse_export_text(payload: str, origin: str) -> Is3Export:
+    """Parse export text that arrived by hand -- an upload into the form, say."""
+    return _parse(payload, origin)
+
+
 def _parse(payload: str, origin: str) -> Is3Export:
     """Parse an export, rejecting one that yielded nothing."""
     export = parse_export(payload)

@@ -1,10 +1,17 @@
 """Config flow for the IS3 Export integration.
 
 Both the initial setup and a later reconfigure share one form and one
-validation path: load the export (from the unit or a local file) and probe the
-ASCII port.  Reconfigure lets the port, delimiter or number base be corrected
-without removing the integration -- which matters because a wrong delimiter or
-base leaves every read unanswered (see the repair card in ``issues.py``).
+validation path: load the export (from the unit, a local file, or a file
+dropped straight into the form) and probe the ASCII port.  Reconfigure lets
+the port, delimiter or number base be corrected without removing the
+integration -- which matters because a wrong delimiter or base leaves every
+read unanswered (see the repair card in ``issues.py``).
+
+The upload exists because newer CU3 firmware (seen on a CU3-08M) no longer
+serves the export over HTTP, and copying the file onto the Home Assistant
+machine by hand is a chore.  An uploaded export is saved under the config
+folder and the entry stores that path, so everything downstream still deals in
+plain files.
 """
 
 from __future__ import annotations
@@ -15,15 +22,19 @@ from typing import Any
 
 import voluptuous as vol
 
+from homeassistant.components.file_upload import process_uploaded_file
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import FileSelector, FileSelectorConfig
+from homeassistant.util import slugify
 
 from .api import Is3Client, Is3ConnectionError
 from .const import (
     BASE_HEX,
     CONF_DELIMITER,
     CONF_EXPORT_FILE,
+    CONF_EXPORT_UPLOAD,
     CONF_NUMBER_BASE,
     DEFAULT_HTTP_PORT,
     DEFAULT_PORT,
@@ -31,12 +42,14 @@ from .const import (
     DELIMITERS,
     DOMAIN,
     NUMBER_BASES,
+    SAVED_EXPORT_DIR,
 )
 from .export import Is3Export
 from .source import (
     Is3ExportAuthError,
     Is3ExportError,
     async_fetch_export,
+    parse_export_text,
     read_export_file,
 )
 
@@ -59,6 +72,12 @@ def build_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Optional(
                 CONF_EXPORT_FILE, default=defaults.get(CONF_EXPORT_FILE, "")
             ): str,
+            # A drop-in alternative to the path: newer CU3 firmware serves no
+            # HTTP export, and this saves copying the file to the HA machine.
+            # Never pre-filled -- an upload id is transient, not configuration.
+            vol.Optional(CONF_EXPORT_UPLOAD): FileSelector(
+                FileSelectorConfig(accept=".is3,.imm,.txt")
+            ),
             vol.Optional(
                 CONF_DELIMITER, default=defaults.get(CONF_DELIMITER, DELIMITER_SPACE)
             ): vol.In(DELIMITERS),
@@ -67,6 +86,11 @@ def build_schema(defaults: dict[str, Any]) -> vol.Schema:
             ): vol.In(NUMBER_BASES),
         }
     )
+
+
+def saved_export_filename(unique_id: str) -> str:
+    """The file an uploaded export is saved as, named after the unit."""
+    return f"{slugify(unique_id)}.is3"
 
 
 def unit_identity(export: Is3Export, host: str) -> tuple[str, str]:
@@ -86,6 +110,10 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        """Track the text of an export dropped into the current form."""
+        self._uploaded_text: str | None = None
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -98,6 +126,7 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
                 unique_id, title = unit_identity(export, user_input[CONF_HOST])
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
+                await self._async_store_upload(user_input, unique_id)
                 return self.async_create_entry(title=title, data=user_input)
 
         return self.async_show_form(
@@ -121,6 +150,7 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
                 # Reconfiguring must stay on the same unit, not repoint the entry
                 # at a different one and shadow whatever entry already owns it.
                 self._abort_if_unique_id_mismatch(reason="wrong_unit")
+                await self._async_store_upload(user_input, unique_id)
                 return self.async_update_reload_and_abort(entry, data_updates=user_input)
 
         defaults = user_input if user_input is not None else dict(entry.data)
@@ -136,6 +166,7 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
         """Load the export and probe the ASCII port; return (export, errors)."""
         errors: dict[str, str] = {}
         export: Is3Export | None = None
+        self._uploaded_text = None
 
         try:
             export = await self._async_load_export(user_input)
@@ -146,7 +177,13 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
             errors[CONF_EXPORT_FILE] = "invalid_auth"
         except Is3ExportError as err:
             _LOGGER.debug("Cannot load export: %s", err)
-            errors[CONF_EXPORT_FILE] = "invalid_export"
+            # Blame the field the export actually came from.
+            failed = (
+                CONF_EXPORT_UPLOAD
+                if user_input.get(CONF_EXPORT_UPLOAD)
+                else CONF_EXPORT_FILE
+            )
+            errors[failed] = "invalid_export"
 
         if not errors:
             client = Is3Client(
@@ -168,13 +205,55 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
         return export, errors
 
     async def _async_load_export(self, user_input: dict[str, Any]) -> Is3Export:
-        """Load the export from disk, or from the unit when no path is given."""
+        """Load the export: an uploaded file, a path on disk, or the unit itself."""
+        if file_id := user_input.get(CONF_EXPORT_UPLOAD):
+            text = await self.hass.async_add_executor_job(
+                self._read_uploaded_file, file_id
+            )
+            export = parse_export_text(text, "the uploaded file")
+            # Kept only after the whole validation passes, so a rejected form
+            # leaves nothing behind.
+            self._uploaded_text = text
+            return export
+
         if path := user_input.get(CONF_EXPORT_FILE, "").strip():
             return await self.hass.async_add_executor_job(read_export_file, Path(path))
 
-        # The unit serves the export over plain HTTP on port 80, unauthenticated.
+        # Classic firmware serves the export over plain HTTP on port 80,
+        # unauthenticated.  Newer firmware (CU3-08M) does not serve it at all --
+        # that is what the upload above is for.
         return await async_fetch_export(
             async_get_clientsession(self.hass),
             user_input[CONF_HOST],
             DEFAULT_HTTP_PORT,
         )
+
+    def _read_uploaded_file(self, file_id: str) -> str:
+        """Read the export the user dropped into the form (executor)."""
+        with process_uploaded_file(self.hass, file_id) as path:
+            return path.read_text(encoding="utf-8-sig", errors="replace")
+
+    async def _async_store_upload(
+        self, user_input: dict[str, Any], unique_id: str
+    ) -> None:
+        """Keep an uploaded export as a file, so the entry stores only a path.
+
+        The coordinator then re-reads it from disk exactly like a hand-copied
+        export, and a republished project is a matter of uploading again (or
+        overwriting the saved file).  The transient upload id never reaches the
+        stored entry.
+        """
+        user_input.pop(CONF_EXPORT_UPLOAD, None)
+        if self._uploaded_text is None:
+            return
+        user_input[CONF_EXPORT_FILE] = await self.hass.async_add_executor_job(
+            self._write_saved_export, unique_id, self._uploaded_text
+        )
+
+    def _write_saved_export(self, unique_id: str, text: str) -> str:
+        """Write the uploaded export under the config folder (executor)."""
+        folder = Path(self.hass.config.path(SAVED_EXPORT_DIR))
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / saved_export_filename(unique_id)
+        path.write_text(text, encoding="utf-8")
+        return str(path)

@@ -78,6 +78,7 @@ Ručně: zkopíruj `custom_components/is3_export` do `config/custom_components/`
 | Host | IP adresa jednotky | — |
 | ASCII port | **z IDM3** | `22272` |
 | Export file path | nech prázdné, stáhne se z jednotky | prázdné |
+| Nahrání exportu | novější firmware (např. CU3-08M) export přes HTTP neservíruje — přetáhni sem `.is3` uložený z IDM3; kopie se drží v `config/is3_export/` | — |
 | Oddělovač | **z IDM3**, nabízí všech 27 možností | mezera `[32]` |
 | Číselná soustava | **z IDM3** — hodnoty se čtou v této soustavě (starší jednotky posílají hex bez prefixu `0x`, takže musí sedět) | hexadecimální |
 

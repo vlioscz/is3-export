@@ -11,12 +11,18 @@ from __future__ import annotations
 import voluptuous as vol
 
 from homeassistant.const import CONF_HOST, CONF_PORT
+from homeassistant.helpers.selector import FileSelector
 
-from custom_components.is3_export.config_flow import build_schema, unit_identity
+from custom_components.is3_export.config_flow import (
+    build_schema,
+    saved_export_filename,
+    unit_identity,
+)
 from custom_components.is3_export.const import (
     BASE_HEX,
     CONF_DELIMITER,
     CONF_EXPORT_FILE,
+    CONF_EXPORT_UPLOAD,
     CONF_NUMBER_BASE,
     DEFAULT_PORT,
     DELIMITER_SPACE,
@@ -69,6 +75,27 @@ def test_reconfigure_opens_on_the_current_values() -> None:
     assert defaults[CONF_PORT] == 22272
     assert defaults[CONF_DELIMITER] == ";"
     assert defaults[CONF_NUMBER_BASE] == "dec"
+
+
+def test_the_form_offers_an_export_upload() -> None:
+    """The export can be dropped straight into the form.
+
+    Newer CU3 firmware serves no HTTP export, so without this the file would
+    have to be copied onto the Home Assistant machine by hand.
+    """
+    schema = build_schema({})
+    marker = next(m for m in schema.schema if str(m) == CONF_EXPORT_UPLOAD)
+    assert isinstance(marker, vol.Optional)
+    assert isinstance(schema.schema[marker], FileSelector)
+    # An upload id is transient, so the field is never pre-filled -- not even
+    # on reconfigure.
+    assert marker.default is vol.UNDEFINED
+
+
+def test_uploaded_exports_are_saved_under_a_safe_name() -> None:
+    """The saved file is named after the unit, slugified for the filesystem."""
+    assert saved_export_filename("ABC123") == "abc123.is3"
+    assert saved_export_filename("192.168.1.5") == "192_168_1_5.is3"
 
 
 def test_schema_validates_a_complete_input() -> None:

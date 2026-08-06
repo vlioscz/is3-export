@@ -14,7 +14,14 @@ MANUFACTURER: Final = "ELKO EP"
 MODEL: Final = "iNELS central unit (CU3)"
 
 CONF_EXPORT_FILE: Final = "export_file"
+CONF_EXPORT_UPLOAD: Final = "export_upload"
 CONF_DELIMITER: Final = "delimiter"
+
+# An export dropped into the setup form is kept here, under the Home Assistant
+# config folder, so a config entry always holds a plain file path whichever way
+# the export arrived.  Overwriting the saved file (or uploading again) is how a
+# republished project reaches units whose firmware serves no HTTP export.
+SAVED_EXPORT_DIR: Final = "is3_export"
 
 # The unit serves the export over plain HTTP on port 80, which is not
 # configurable on the unit, so it is fixed rather than asked for.  Leaving the

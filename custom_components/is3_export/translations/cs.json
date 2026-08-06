@@ -3,22 +3,24 @@
     "step": {
       "user": {
         "title": "Centrální jednotka iNELS (CU3)",
-        "description": "Nejdřív povol protokol třetích stran v iNELS IDM3 (Konfigurace centrální jednotky → Third part setting), poznamenej si port a zaškrtej události, které má jednotka posílat. Bez toho nebude fungovat nic.\n\nPort, oddělovač a číselná soustava níže musí odpovídat tomu, co je nastavené tam. Když necháš cestu k exportu prázdnou, stáhne se z jednotky. Heslo projektu iNELS na to nemá vliv — export se servíruje bez přihlášení, takže žádné údaje nejsou potřeba.",
+        "description": "Nejdřív povol protokol třetích stran v iNELS IDM3 (Konfigurace centrální jednotky → Third part setting), poznamenej si port a zaškrtej události, které má jednotka posílat. Bez toho nebude fungovat nic.\n\nPort, oddělovač a číselná soustava níže musí odpovídat tomu, co je nastavené tam. Když necháš cestu k exportu prázdnou, stáhne se z jednotky. Novější firmware (např. CU3-08M) export přes HTTP neservíruje — ulož iNELS3 export v IDM3 a přetáhni soubor do pole pro nahrání. Heslo projektu iNELS na to nemá vliv — pokud jednotka export servíruje, dělá to bez přihlášení.",
         "data": {
           "host": "Adresa",
           "port": "ASCII port (z IDM3)",
           "export_file": "Cesta k exportnímu souboru (prázdné = stáhnout)",
+          "export_upload": "Nahrání exportu (přetáhni sem soubor .is3)",
           "delimiter": "Oddělovač (z IDM3)",
           "number_base": "Číselná soustava (z IDM3)"
         }
       },
       "reconfigure": {
         "title": "Centrální jednotka iNELS (CU3)",
-        "description": "Uprav, jak se Home Assistant připojuje k jednotce. Port, oddělovač a číselná soustava musí odpovídat nastavení protokolu třetích stran (ASCII) v iNELS IDM3. Když necháš cestu k exportu prázdnou, stáhne se z jednotky.",
+        "description": "Uprav, jak se Home Assistant připojuje k jednotce. Port, oddělovač a číselná soustava musí odpovídat nastavení protokolu třetích stran (ASCII) v iNELS IDM3. Když necháš cestu k exportu prázdnou, stáhne se z jednotky — nebo přetáhni čerstvý export do pole pro nahrání.",
         "data": {
           "host": "Adresa",
           "port": "ASCII port (z IDM3)",
           "export_file": "Cesta k exportnímu souboru (prázdné = stáhnout)",
+          "export_upload": "Nahrání exportu (přetáhni sem soubor .is3)",
           "delimiter": "Oddělovač (z IDM3)",
           "number_base": "Číselná soustava (z IDM3)"
         }
