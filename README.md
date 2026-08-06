@@ -21,6 +21,14 @@ state live: the unit pushes changes on its own, so nothing is polled.
 > 03-03-34 through 03-05-03). Covers report an **assumed state** — no position
 > feedback; see [Limitations](#limitations).
 
+> **⚠️ New-generation units don't work yet** (CU3-07M/08M/09M/10M — the
+> "Gateway Settings" web interface). Their current firmware (as of 2026-08)
+> never starts the third-party ASCII server: the settings save fine, but the
+> port never opens — and the unit serves no HTTP export either. Don't spend
+> time trying to make it work; the fix has to come from ELKO in a firmware
+> update. The export-upload field below is ready for that day. Classic units
+> (the original web interface) work as documented.
+
 ## ❗ First enable the protocol in IDM3
 
 Without this nothing works — the unit isn't listening on the ASCII port.
@@ -81,7 +89,7 @@ Manually: copy `custom_components/is3_export` into `config/custom_components/`.
 | Host | The unit's IP address | — |
 | ASCII port | **from IDM3** | `22272` |
 | Export file path | leave empty, it downloads from the unit | empty |
-| Export file upload | newer firmware (e.g. CU3-08M) serves no HTTP export — drop the `.is3` saved from IDM3 here; it is kept under `config/is3_export/` | — |
+| Export file upload | for units that serve no HTTP export — drop the `.is3` saved from IDM3 here; it is kept under `config/is3_export/` | — |
 | Separator | **from IDM3**, offers all 27 options | space `[32]` |
 | Number base | **from IDM3** — values are read in this base (older units send hex without the `0x` prefix, so it must match) | hexadecimal |
 

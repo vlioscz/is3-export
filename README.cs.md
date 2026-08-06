@@ -21,6 +21,14 @@ sleduje živě: jednotka posílá změny sama, takže se nic nepolluje.
 > 03-05-03). Rolety hlásí **odhadovaný stav** — bez zpětné vazby o poloze; viz
 > [Omezení](#omezení).
 
+> **⚠️ Nová generace jednotek zatím nefunguje** (CU3-07M/08M/09M/10M — webové
+> rozhraní „Gateway Settings"). Současný firmware (stav 2026-08) server
+> protokolu třetích stran vůbec nespustí: nastavení se v pořádku uloží, ale
+> port se nikdy neotevře — a jednotka neservíruje ani HTTP export. Neztrácej
+> čas pokusy to rozběhat; opravu musí dodat ELKO ve firmwaru. Pole pro nahrání
+> exportu níže je na ten den připravené. Klasické jednotky (původní webové
+> rozhraní) fungují podle dokumentace.
+
 ## ❗ Nejdřív povol protokol v IDM3
 
 Bez tohohle nefunguje nic — jednotka na ASCII portu neposlouchá.
@@ -78,7 +86,7 @@ Ručně: zkopíruj `custom_components/is3_export` do `config/custom_components/`
 | Host | IP adresa jednotky | — |
 | ASCII port | **z IDM3** | `22272` |
 | Export file path | nech prázdné, stáhne se z jednotky | prázdné |
-| Nahrání exportu | novější firmware (např. CU3-08M) export přes HTTP neservíruje — přetáhni sem `.is3` uložený z IDM3; kopie se drží v `config/is3_export/` | — |
+| Nahrání exportu | pro jednotky, které export přes HTTP neservírují — přetáhni sem `.is3` uložený z IDM3; kopie se drží v `config/is3_export/` | — |
 | Oddělovač | **z IDM3**, nabízí všech 27 možností | mezera `[32]` |
 | Číselná soustava | **z IDM3** — hodnoty se čtou v této soustavě (starší jednotky posílají hex bez prefixu `0x`, takže musí sedět) | hexadecimální |
 
