@@ -195,11 +195,12 @@ Skládají se z několika adres do jedné entity `cover`, ze tří možných zdr
    (`Roleta_loznice_UP`) i uprostřed (`…_UP_…`) — spáruje obě poloviny na
    **stejném modulu**.
 
-Holé relé se samo nerozepne, takže **relé roleta (forma 3)** dostane
-**travel-time** entitu `number` (výchozí 30 s): po pohybu integrace relé po té
-době rozepne, tak ji **nastav na reálnou dobu chodu** rolety (o chlup víc), ať
-dojede na doraz dřív. Reverz nejdřív uvolní opačný směr, chvíli počká a pak
-zabere — modul směry hardwarově blokuje.
+Holé relé se samo nerozepne, takže **relé roleta (formy 2 i 3 — JA3 pár
+funguje úplně stejně, jen má blokování směrů zadrátované na desce modulu)**
+dostane **travel-time** entitu `number` (výchozí 30 s): po pohybu integrace
+relé po té době rozepne, tak ji **nastav na reálnou dobu chodu** rolety
+(o chlup víc), ať dojede na doraz dřív. Reverz nejdřív uvolní opačný směr,
+chvíli počká a pak zabere — modul směry hardwarově blokuje.
 
 Poloha se nehlásí, takže cover nese **odhadovaný stav**. Adresy, které si vezme
 žaluzie, už nevzniknou jako spínače.

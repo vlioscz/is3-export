@@ -198,12 +198,13 @@ sources:
    suffix (`Roleta_loznice_UP`) or in the middle (`…_UP_…`) — pairs the two
    halves that share **the same module**.
 
-A bare relay won't release itself, so a **relay blind (form 3)** gets a
-**travel-time** `number` entity (default 30 s): after a move the integration
-releases the relay once that time elapses, so **set it to the blind's real run
-time** (a touch more) and it reaches the end stop first. Reversing first releases
-the opposite direction, waits briefly, then drives — the module interlocks the
-two directions in hardware.
+A bare relay won't release itself, so a **relay blind (forms 2 and 3 — a JA3
+pair works the same way, its interlock is just wired on the module's board)**
+gets a **travel-time** `number` entity (default 30 s): after a move the
+integration releases the relay once that time elapses, so **set it to the
+blind's real run time** (a touch more) and it reaches the end stop first.
+Reversing first releases the opposite direction, waits briefly, then drives —
+the module interlocks the two directions in hardware.
 
 Neither reports its position, so a cover carries an **assumed state**. Addresses
 taken by a blind no longer appear as switches.

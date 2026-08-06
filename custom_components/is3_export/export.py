@@ -500,7 +500,9 @@ class Is3Cover:
 
     name: str
     source: str
-    """Either ``systembit`` (pulsed program bits) or ``relay`` (a JA3 pair)."""
+    """Either ``systembit`` (pulsed program bits) or ``relay`` (a relay pair,
+    JA3 driver channels and plain-module named pairs alike -- both are driven
+    directly and share the timed release)."""
 
     open: Is3Entry
     close: Is3Entry

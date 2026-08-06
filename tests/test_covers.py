@@ -8,8 +8,11 @@ import pytest
 
 import asyncio
 
+from homeassistant.components.cover import CoverEntityFeature
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from custom_components.is3_export import cover as cover_module
+from custom_components.is3_export import number as number_module
 from custom_components.is3_export.cover import Is3CoverEntity, needs_release_first
 from custom_components.is3_export.export import (
     find_covers,
@@ -204,8 +207,8 @@ def test_ordinary_relays_are_left_alone(relay_covers) -> None:
 #
 # A blind need not sit on a JA3 driver.  On a plain relay module two outputs are
 # wired to one motor and interlocked, and only the entry name says which way each
-# runs -- the hardware id is a bare `SA3-04M_RE3_<serial>`.  These are the blinds
-# on the real second installation (10.0.0.120).
+# runs -- the hardware id is a bare `SA3-04M_RE3_<serial>`.  Seen on a real
+# box-module installation.
 
 NAMED_RELAYS = """VERSION_01-03-03_ID_DEF_NAME_Named
 Roleta_loznice_UP SA3-04M_RE3_0C0004 0x01020021 0x00000000
@@ -281,6 +284,41 @@ def test_a_name_reused_across_modules_is_not_paired(named_covers) -> None:
     claimed = {a for c in named_covers.values() for a in c.addresses}
     assert 0x010200E1 not in claimed
     assert 0x010200E2 not in claimed
+
+
+# --- The timed release covers every relay blind, JA3 and named alike --------
+#
+# The drive principle is identical on both conventions -- a JA3 board merely
+# hard-wires the direction interlock -- so the auto-release after the travel
+# time (and the travel-time number that feeds it) must not depend on which
+# convention paired the relays.  All three modules meet on the one source
+# string ``relay``.
+
+
+class _FakeConfigEntry:
+    entry_id = "entry"
+    title = "Unit"
+
+
+class _FakeCoordinator:
+    config_entry = _FakeConfigEntry()
+    cover_travel_times: dict[int, float] = {}
+
+
+def test_every_relay_blind_is_timed(relay_covers, named_covers) -> None:
+    """A JA3 pair and a named pair both get the timed release and stop."""
+    assert relay_covers and named_covers
+    for cover in (*relay_covers.values(), *named_covers.values()):
+        assert cover.source == cover_module.RELAY == number_module.RELAY
+        entity = Is3CoverEntity(_FakeCoordinator(), cover)
+        assert entity._timed
+        assert entity.supported_features & CoverEntityFeature.STOP
+
+
+def test_a_program_blind_is_not_timed(covers) -> None:
+    """The unit's blind program times its own moves; nothing to release here."""
+    entity = Is3CoverEntity(_FakeCoordinator(), covers["ZALUZIE_pokoj"])
+    assert not entity._timed
 
 
 # --- Reversing --------------------------------------------------------------
