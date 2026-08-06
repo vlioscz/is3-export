@@ -2,6 +2,10 @@ name: Validate
 
 on:
   push:
+    # Branches only: a release tag points at an already-validated commit, so a
+    # tag push would just duplicate the branch run (and double the failure
+    # mail when GitHub's runners hiccup).
+    branches: ["**"]
   pull_request:
   schedule:
     - cron: "0 4 * * 1"
