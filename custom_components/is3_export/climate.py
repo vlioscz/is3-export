@@ -29,6 +29,7 @@ settle and the read-back were verified on a live unit.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from homeassistant.components.climate import (
@@ -44,7 +45,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import Is3Error
+from .errors import Is3Error
 from .const import DOMAIN, MANUFACTURER, MODEL
 from .coordinator import Is3ConfigEntry, Is3Coordinator
 from .export import (
@@ -54,6 +55,8 @@ from .export import (
     Is3Controller,
     find_controllers,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 TEMP_SCALE = 100
 MIN_TEMP = 5.0
@@ -103,6 +106,16 @@ class Is3Climate(CoordinatorEntity[Is3Coordinator], ClimateEntity):
         config_entry_id = coordinator.config_entry.entry_id
         self._attr_unique_id = f"{config_entry_id}_{controller.unique_id}"
         self._attr_name = controller.name.replace("_", " ")
+
+        # Setting a temperature takes seconds -- it switches the zone to Manual,
+        # waits for that to settle, writes, and reads back.  Dragging the slider
+        # sends a call per step, so several of those overlap, and they used to
+        # fight: each one read back a value another had just written, decided
+        # its own write had been refused, wrote again, and eventually reported
+        # a failure for a setpoint that was simply no longer wanted.  Now they
+        # queue, and one that has been superseded steps aside.
+        self._setpoint_lock = asyncio.Lock()
+        self._setpoint_wanted: int | None = None
 
         # Cooling is offered only where the zone actually has a cooling output
         # configured -- every zone carries the cool channels, so their presence
@@ -205,16 +218,15 @@ class Is3Climate(CoordinatorEntity[Is3Coordinator], ClimateEntity):
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set a target temperature.
 
-        Switch to Manual, let it settle, then write the setpoint and confirm it
-        landed -- writing too soon after the switch corrupts the value, so the
-        write is verified against Required-Therm-AOUT and repeated if needed.
+        One write at a time per zone, and only the newest one: dragging the
+        slider sends a call per step, each taking seconds, and they used to
+        overlap and overwrite each other's read-back.
         """
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
 
         raw = round(temperature * TEMP_SCALE)
-        client = self.coordinator.client
 
         # Cooling has its own manual setpoint and its own setpoint-in-force; when
         # the zone is in cooling, write and verify those instead of the heat ones.
@@ -233,19 +245,72 @@ class Is3Climate(CoordinatorEntity[Is3Coordinator], ClimateEntity):
         manual_hex = f"0x{manual_addr:08X}"
         required_hex = f"0x{required_addr:08X}"
 
+        # Whoever asked last is the one who meant it.
+        self._setpoint_wanted = raw
+
+        async with self._setpoint_lock:
+            if self._setpoint_wanted != raw:
+                # A newer temperature was asked for while this one waited its
+                # turn.  Writing this one now would undo it.
+                _LOGGER.debug(
+                    "Dropping superseded setpoint %s °C on %s",
+                    temperature,
+                    self._attr_name,
+                )
+                return
+            await self._async_write_setpoint(
+                temperature, raw, preset_hex, manual_hex, required_hex, required_addr
+            )
+
+    async def _async_write_setpoint(
+        self,
+        temperature: float,
+        raw: int,
+        preset_hex: str,
+        manual_hex: str,
+        required_hex: str,
+        required_addr: int,
+    ) -> None:
+        """Switch to Manual, write the setpoint, and confirm it where possible.
+
+        Writing too soon after the switch to Manual corrupts the value, so the
+        write settles first and is then read back against Required-Therm-AOUT,
+        repeating if it did not stick.
+
+        A zone that is switched off reports **no** setpoint at all, so there is
+        nothing to read back.  That is not the same as the write failing, and it
+        must not be reported as one: only a value that actually contradicts what
+        was written counts as a refusal.
+        """
+        client = self.coordinator.client
+
         try:
             if self.coordinator.values.get(self.controller.preset_select) != PRESET_MANUAL:
                 await client.async_set(preset_hex, PRESET_MANUAL)
                 await asyncio.sleep(MANUAL_SETTLE)
 
+            reported: int | None = None
             for _ in range(SETPOINT_ATTEMPTS):
                 await client.async_set(manual_hex, raw)
                 await asyncio.sleep(SETPOINT_VERIFY_DELAY)
-                if await client.async_get(required_hex) == raw:
+                reported = await client.async_get(required_hex)
+                if reported == raw:
                     break
             else:
-                raise HomeAssistantError(
-                    f"Setpoint {temperature} °C did not take on {self._attr_name}"
+                if reported is not None:
+                    # The zone reports a setpoint, and it is not the one asked
+                    # for: the write really did not take.
+                    raise HomeAssistantError(
+                        f"Setpoint {temperature} °C did not take on {self._attr_name}"
+                    )
+                # The zone reports no setpoint -- it is switched off, or its
+                # plan drives it.  The write was accepted; there is simply
+                # nothing to read back.
+                _LOGGER.debug(
+                    "%s reports no setpoint to confirm %s °C against; "
+                    "taking the write at its word",
+                    self._attr_name,
+                    temperature,
                 )
         except Is3Error as err:
             raise HomeAssistantError(

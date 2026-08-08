@@ -1,22 +1,25 @@
 """Config flow for the IS3 Export integration.
 
-Both the initial setup and a later reconfigure share one form and one
-validation path: load the export (from the unit, a local file, or a file
-dropped straight into the form) and probe the ASCII port.  Reconfigure lets
-the port, delimiter or number base be corrected without removing the
-integration -- which matters because a wrong delimiter or base leaves every
-read unanswered (see the repair card in ``issues.py``).
+Setup, reconfigure and re-authentication share one validation path: load the
+export (from the unit, a local file, or a file dropped straight into the form),
+then connect to the unit and *read* one address.
 
-The upload exists because newer CU3 firmware (seen on a CU3-08M) no longer
-serves the export over HTTP, and copying the file onto the Home Assistant
-machine by hand is a chore.  An uploaded export is saved under the config
-folder and the entry stores that path, so everything downstream still deals in
-plain files.
+The read is the part that matters.  A unit hands back a session token even when
+the password is not the one it wanted, and only then quietly ignores every
+request for a value -- so a connection that succeeded proves nothing.  Without
+reading something back, a wrong password would sail through setup and leave
+every entity blank with nothing to explain why.
+
+The upload exists because newer CU3 firmware no longer serves the export over
+HTTP, and copying the file onto the Home Assistant machine by hand is a chore.
+An uploaded export is saved under the config folder and the entry stores that
+path, so everything downstream still deals in plain files.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -24,27 +27,28 @@ import voluptuous as vol
 
 from homeassistant.components.file_upload import process_uploaded_file
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
-from homeassistant.const import CONF_HOST, CONF_PORT
+from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.selector import FileSelector, FileSelectorConfig
+from homeassistant.helpers.selector import (
+    FileSelector,
+    FileSelectorConfig,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 from homeassistant.util import slugify
 
-from .api import Is3Client, Is3ConnectionError
+from .client import Is3Client, async_password_required
+from .errors import Is3AuthError, Is3ConnectionError
 from .const import (
-    BASE_HEX,
-    CONF_DELIMITER,
     CONF_EXPORT_FILE,
     CONF_EXPORT_UPLOAD,
-    CONF_NUMBER_BASE,
     DEFAULT_HTTP_PORT,
     DEFAULT_PORT,
-    DELIMITER_SPACE,
-    DELIMITERS,
     DOMAIN,
-    NUMBER_BASES,
     SAVED_EXPORT_DIR,
 )
-from .export import Is3Export
+from .export import Is3Export, is_readable
 from .source import (
     Is3ExportAuthError,
     Is3ExportError,
@@ -56,12 +60,18 @@ from .source import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def password_field() -> TextSelector:
+    """A masked password box.  Optional: most units have no password set."""
+    return TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+
+
 def build_schema(defaults: dict[str, Any]) -> vol.Schema:
     """The setup form, pre-filled from ``defaults``.
 
-    Empty defaults give a fresh install (host blank, the documented port and the
-    common delimiter/base); the reconfigure step passes the entry's own values
-    so the form opens on what is currently set.
+    Empty defaults give a fresh install; the reconfigure step passes the entry's
+    own values so the form opens on what is currently set.  The password is
+    pre-filled there on purpose -- otherwise someone correcting the host would
+    silently blank it and break the entry.
     """
     return vol.Schema(
         {
@@ -69,6 +79,9 @@ def build_schema(defaults: dict[str, Any]) -> vol.Schema:
                 CONF_HOST, default=defaults.get(CONF_HOST, vol.UNDEFINED)
             ): str,
             vol.Required(CONF_PORT, default=defaults.get(CONF_PORT, DEFAULT_PORT)): int,
+            vol.Optional(
+                CONF_PASSWORD, default=defaults.get(CONF_PASSWORD, "")
+            ): password_field(),
             vol.Optional(
                 CONF_EXPORT_FILE, default=defaults.get(CONF_EXPORT_FILE, "")
             ): str,
@@ -78,12 +91,6 @@ def build_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Optional(CONF_EXPORT_UPLOAD): FileSelector(
                 FileSelectorConfig(accept=".is3,.imm,.txt")
             ),
-            vol.Optional(
-                CONF_DELIMITER, default=defaults.get(CONF_DELIMITER, DELIMITER_SPACE)
-            ): vol.In(DELIMITERS),
-            vol.Optional(
-                CONF_NUMBER_BASE, default=defaults.get(CONF_NUMBER_BASE, BASE_HEX)
-            ): vol.In(NUMBER_BASES),
         }
     )
 
@@ -108,7 +115,13 @@ def unit_identity(export: Is3Export, host: str) -> tuple[str, str]:
 class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the setup and reconfigure dialogs for one central unit."""
 
-    VERSION = 1
+    # 2: the binary transport.  A major bump, not a minor one, because an entry
+    # written here cannot be read by 0.1.x -- and would not fail loudly if it
+    # tried, since the old code defaults every key it no longer finds.  Home
+    # Assistant refuses an entry from a newer version outright, which is the
+    # behaviour we want if anyone rolls back.
+    VERSION = 2
+    MINOR_VERSION = 1
 
     def __init__(self) -> None:
         """Track the text of an export dropped into the current form."""
@@ -160,10 +173,43 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> ConfigFlowResult:
+        """The unit stopped accepting the stored password."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask for the unit's password again and check it before storing it."""
+        errors: dict[str, str] = {}
+        entry = self._get_reauth_entry()
+
+        if user_input is not None:
+            errors = await self._async_check_password(
+                entry.data[CONF_HOST],
+                entry.data.get(CONF_PORT, DEFAULT_PORT),
+                user_input.get(CONF_PASSWORD, ""),
+            )
+            if not errors:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={CONF_PASSWORD: user_input.get(CONF_PASSWORD, "")},
+                )
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {vol.Optional(CONF_PASSWORD, default=""): password_field()}
+            ),
+            errors=errors,
+        )
+
     async def _async_validate(
         self, user_input: dict[str, Any]
     ) -> tuple[Is3Export | None, dict[str, str]]:
-        """Load the export and probe the ASCII port; return (export, errors)."""
+        """Load the export and check the unit answers; return (export, errors)."""
         errors: dict[str, str] = {}
         export: Is3Export | None = None
         self._uploaded_text = None
@@ -171,10 +217,11 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
         try:
             export = await self._async_load_export(user_input)
         except Is3ExportAuthError as err:
-            # This installation's export is unprotected; a unit that blocks the
-            # download must be set up from a local export file instead.
+            # The unit's own web server is asking for credentials this
+            # integration does not collect; the way out is a local or uploaded
+            # export, not a password.
             _LOGGER.debug("Export is protected: %s", err)
-            errors[CONF_EXPORT_FILE] = "invalid_auth"
+            errors[CONF_EXPORT_FILE] = "export_protected"
         except Is3ExportError as err:
             _LOGGER.debug("Cannot load export: %s", err)
             # Blame the field the export actually came from.
@@ -185,24 +232,55 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             errors[failed] = "invalid_export"
 
-        if not errors:
-            client = Is3Client(
+        if not errors and export is not None:
+            errors = await self._async_check_password(
                 user_input[CONF_HOST],
                 user_input[CONF_PORT],
-                user_input[CONF_DELIMITER],
-                user_input[CONF_NUMBER_BASE],
+                user_input.get(CONF_PASSWORD, ""),
+                export,
             )
-            try:
-                await client.async_connect()
-            except Is3ConnectionError:
-                errors[CONF_HOST] = "cannot_connect"
-            except Exception:  # noqa: BLE001
-                _LOGGER.exception("Unexpected error connecting to the IS3 unit")
-                errors["base"] = "unknown"
-            finally:
-                await client.async_close()
 
         return export, errors
+
+    async def _async_check_password(
+        self,
+        host: str,
+        port: int,
+        password: str,
+        export: Is3Export | None = None,
+    ) -> dict[str, str]:
+        """Connect, then read one address back.  Returns the errors to show.
+
+        Reading is what proves the password: the unit issues a token either way
+        and only afterwards decides whether to answer.  Where the export is at
+        hand a real address from it is used; the reauth step has none loaded, so
+        it falls back to an address every unit has.
+        """
+        probe = next((e for e in export.entries if is_readable(e)), None) if export else None
+        address = probe.address_hex if probe is not None else "0x01020001"
+
+        client = Is3Client(host, port, password)
+        try:
+            await client.async_connect()
+            await client.async_get(address)
+        except Is3AuthError:
+            # The unit will say whether it has a password at all, without being
+            # authorized -- so tell the difference between "you left this blank
+            # and it needs one" and "the one you typed is wrong".
+            needs_password = await async_password_required(host, port)
+            if needs_password and not password:
+                return {CONF_PASSWORD: "password_required"}
+            return {CONF_PASSWORD: "invalid_auth"}
+        except Is3ConnectionError:
+            return {CONF_HOST: "cannot_connect"}
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Unexpected error connecting to the unit")
+            return {"base": "unknown"}
+        finally:
+            # Load-bearing: an abandoned client keeps a reconnect loop running
+            # against the unit for as long as Home Assistant is up.
+            await client.async_close()
+        return {}
 
     async def _async_load_export(self, user_input: dict[str, Any]) -> Is3Export:
         """Load the export: an uploaded file, a path on disk, or the unit itself."""

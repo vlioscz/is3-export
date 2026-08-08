@@ -6,68 +6,106 @@
 
 **English** · [Česky](README.cs.md)
 
-UNOFFICIAL Home Assistant integration for **iNELS central units** (ELKO EP) over their
-ASCII interface — primarily the older **CU3-01M** and **CU3-02M**. It talks to the
-unit directly and **needs no Connection Server**.
+UNOFFICIAL Home Assistant integration for **iNELS central units** (ELKO EP). It
+talks to the unit directly over **UDP port 9999** — the same port the unit's own
+configuration software connects to — so it **needs no Connection Server**.
 
 > The "IS3" in the name is **iNELS3** — the `.is3` export format the integration
 > is based on.
 
-It downloads the device list from the export the unit serves itself. It tracks
-state live: the unit pushes changes on its own, so nothing is polled.
+**Nothing has to be enabled on the unit.** On every unit tested it answered on
+that port as it came, and pushed changes on its own without any event
+configuration — there is no port to open and nothing to switch on in IDM3.
 
-> **Status: experimental.** The protocol is verified against live units, the
-> parser against exports from several installations (17 to 1125 items, IDM3
-> 03-03-34 through 03-05-03). Covers report an **assumed state** — no position
-> feedback; see [Limitations](#limitations).
+The device list comes from the unit's `.is3` export: downloaded straight from
+units that serve it over HTTP, or saved out of IDM3 and dropped into the setup
+form for those that don't — **the newer units serve no export over HTTP**
+(confirmed on **CU3-07M** and **CU3-08M**), so there you upload it once. State is then tracked live from the unit's own events,
+with everything re-read once every 30 s on top.
 
-> **⚠️ New-generation units don't work yet** (CU3-07M/08M/09M/10M — the
-> "Gateway Settings" web interface). Their current firmware (as of 2026-08)
-> never starts the third-party ASCII server: the settings save fine, but the
-> port never opens — and the unit serves no HTTP export either. Don't spend
-> time trying to make it work; the fix has to come from ELKO in a firmware
-> update. The export-upload field below is ready for that day. Classic units
-> (the original web interface) work as documented.
+> **Status: experimental.** Read [What has been tested](#what-has-been-tested)
+> before assuming your unit is covered: part of the range is verified on live
+> hardware, part of it is only expected to behave the same. Covers report an
+> **assumed state** — no position feedback; see [Limitations](#limitations).
 
-## ❗ First enable the protocol in IDM3
+How the protocols were established, and what this software is and isn't:
+[NOTICE.md](NOTICE.md).
 
-Without this nothing works — the unit isn't listening on the ASCII port.
+## What has been tested
 
-In **iNELS IDM3** → *Central unit configuration* → **Third part setting**:
-
-| Item | What to do |
+| Unit | What was actually tested |
 | --- | --- |
-| **Port** | Default **22272** on recent IDM3 (older units used **1111**); it's configurable, so note yours. |
-| **Separator** | Must match the integration's setting. `[32]` is a space. |
-| **Number base** | Must match the integration's setting. |
-| **Mode** | Remote control + IDM |
+| **CU3-01M** (oldest generation) | **reading** verified |
+| a classic **CU3-0x** — the reference installation, IDM3 **03-04-19** | **everything**: reads, writes, events, heating, dimmers, buttons |
+| **CU3-07M**, IDM3 **03-05-03** | **reads and writes** verified |
+| **CU3-08M** | only what 0.1.x needed: it serves **no export over HTTP**, and never opened the port 0.1.x used. **Its port 9999 has not been tested.** |
+| **CU3-09M**, **CU3-10M** | **never tested at all.** They are believed to behave like the 07M/08M, because it is the same firmware family — but that is an expectation, not a result. |
 
-On the right, tick the **events the unit should send**. Whatever you don't tick,
-the integration will never learn about, and the entity stays stuck at its last
-value:
+The export parser is a separate matter, and has a wider base: exports from
+several installations, 17 to 1125 items, written by IDM3 **03-03-34** through
+**03-05-03**.
 
-- `Digital_OUT_SwitchOn` / `SwitchOff` — relays (without them you won't catch a switch flip)
-- `Analog_OUT_ValueChanged`, `Analog_OUT_SwitchOn` / `SwitchOff` — dimmers
-- `Analog_IN_ValueChange`, `Sensor_Change` — temperatures, humidities, analog inputs
-- `Digital_IN_SwitchOn` / `SwitchOff` — inputs and buttons
-- `SysInt_Change`, `Program_ValueSwitchOn` / `Off` — system variables
+If you run a unit that isn't in this table, the useful thing you can do is say
+what happened — either way. That is how the table grows.
 
-Finally, **Save to CU**.
+## Firmware updates can change this
 
-How fast state shows up in Home Assistant depends on these checkboxes. The unit
-is also driven by switches on the walls, so a change need not come from HA — and
-it's only detected from an event. **What has its own event updates within a
-second or so; what doesn't stays at its last known value until it changes
-again** — with one exception: a **heating zone's temperature** is re-read on a
-slow rotation, so a zone whose temperature events aren't ticked still catches up
-instead of freezing at its startup reading. The variability with changes from
-the wall (instant vs. 2–3 s) is the unit's own delay before it sends the change
-over ASCII, not the integration's.
+The protocol this integration speaks was recovered by **observation, not from a
+specification**. Nothing about it is promised to stay put, and a unit firmware
+update can change it with no warning.
 
-Commands from HA itself show up immediately, and the integration then **verifies
-them by reading back** — if the output didn't take, or a switch on the wall
-flipped it in the meantime, the state corrects itself to reality instead of
-leaving the icon stuck in the wrong state.
+- It is **verified against units running IDM3 03-04-19 and 03-05-03**. Other
+  versions are untested — which is not the same as known-broken.
+- If an update does change the wire format, the integration may stop working.
+  The log will say so: the client **warns once, loudly**, when a unit sends
+  datagrams whose opening bytes it does not recognise, and names what it got
+  instead.
+- There is a tool for exactly this question, **new in this release**:
+
+```bash
+python tools/compat_check.py 192.168.1.10 --save before.json
+# ... update the unit's firmware ...
+python tools/compat_check.py 192.168.1.10 --compare before.json
+```
+
+`compat_check.py` fingerprints every assumption the integration makes — the
+packet header, the checksum, the shape of each reply, the value encodings, the
+export format, and the unit's own table of protocol versions — and reports which
+of them moved, each with a plain sentence about what that change costs you. It
+**only reads**, and it prints nothing that identifies the installation (no device
+names, no project name), so the output is safe to paste into an issue.
+
+Run it **before** a firmware update and keep the file. It is worth far more
+before than after.
+
+## How state stays in sync
+
+The unit pushes every change it makes — a relay flipped from the wall, a new
+temperature reading, a button press — with nothing ticked anywhere to ask for
+it.
+
+Commands from Home Assistant show up immediately, and the integration then
+**verifies them by reading back**: if the output didn't take, or a switch on the
+wall flipped it in the meantime, the state corrects itself to reality instead of
+leaving the icon stuck in the wrong state. Measured on the author's unit, the
+unit acknowledges a write in **4 ms**, and its own push event for that write
+arrives **0.13 s** later.
+
+The **device list** follows the unit too. Each cycle the unit is asked for a
+digest of the project loaded in it — one packet — and the export is fetched
+again only when that digest changes, which is exactly when the installer
+republishes from IDM3. So a republished project shows up within a cycle instead
+of within half an hour, and the rest of the time nothing is downloaded at all.
+
+On top of the events, the integration **re-reads every readable address on every
+30-second cycle**. It can afford to: reading the whole installation — **313
+readable addresses** — takes **0.13 s**. So an address whose events stop
+arriving is not stuck; it is back in step within one cycle, without anything
+having to know in advance which addresses are at risk.
+
+**Buttons are left out of that re-read.** A button has no state worth restoring —
+it is a moment, not a value — and re-reading one would only risk replaying a
+press nobody made.
 
 ## Installation
 
@@ -87,23 +125,45 @@ Manually: copy `custom_components/is3_export` into `config/custom_components/`.
 | Field | Description | Default |
 | --- | --- | --- |
 | Host | The unit's IP address | — |
-| ASCII port | **from IDM3** | `22272` |
+| Port | UDP. Change it only if the unit is reached through a tunnel or a forwarded port. | `9999` |
+| Central unit password | the password set on the unit in IDM3; **leave empty if none is set**, which is the usual case | empty |
 | Export file path | leave empty, it downloads from the unit | empty |
 | Export file upload | for units that serve no HTTP export — drop the `.is3` saved from IDM3 here; it is kept under `config/is3_export/` | — |
-| Separator | **from IDM3**, offers all 27 options | space `[32]` |
-| Number base | **from IDM3** — values are read in this base (older units send hex without the `0x` prefix, so it must match) | hexadecimal |
 
 The integration's name is taken from the export header.
 
-**No password is entered.** The unit's web server serves the export as a static
-file with no login, so **the iNELS project password has no effect on its
-availability**. (If some unit blocks the download anyway, enter the path to a
-locally downloaded export.)
+**The password is for the unit, not for the export.** The unit's web server
+serves the export as a static file with no login, so **the iNELS project
+password has no effect on its availability**. (If some unit blocks the download
+anyway, upload the export or enter the path to a locally downloaded one.)
 
-If entities report an *estimated state*, your **separator** or **number base**
-is wrong — Home Assistant raises a repair issue to say so. You can correct it
-without removing the integration: **Settings → Devices & services → IS3 Export
-→ ⋮ → Reconfigure**.
+Any of it can be corrected later without removing the integration: **Settings →
+Devices & services → IS3 Export → ⋮ → Reconfigure**.
+
+## Upgrading from 0.1.x
+
+0.2.0 replaces the transport: everything now goes over **UDP port 9999**.
+**Existing installations upgrade in place** — entity ids, areas and history are
+kept, and nothing has to be set up again.
+
+- The **port** is rewritten to `9999`, whatever was stored before.
+- Two connection settings the old transport needed are **gone**, along with the
+  repair issue that used to complain about them.
+- If the central unit **has a password** set in IDM3, Home Assistant raises its
+  usual re-authentication dialog and asks for it. If none is set, nothing is
+  asked.
+- **One thing worth doing by hand: untick *Third part setting* in IDM3.** That
+  setting lives in the unit, not in Home Assistant, so nothing here can turn it
+  off for you — and while it is on the unit keeps a door open that takes no
+  password and that this integration no longer uses.
+
+Reading the whole installation — **313 readable addresses** — takes **0.13 s**,
+and counter addresses (`0x0206` — water and electricity meters) report the
+unit's real totals.
+
+**Rolling back to 0.1.x** means deleting the integration and adding it again
+(entity ids, areas and history go with it), so take a backup first if you want
+that door left open.
 
 ## Removing the integration
 
@@ -206,6 +266,12 @@ blind's real run time** (a touch more) and it reaches the end stop first.
 Reversing first releases the opposite direction, waits briefly, then drives —
 the module interlocks the two directions in hardware.
 
+A name is weak evidence, so one pairing is deliberately refused: **two outputs
+that each belong to a different heating zone are left as two switches**, not
+joined into a blind. An upstairs and a downstairs zone carry `up` and `down` in
+their names for reasons of their own, and a wrong blind would drive real relays —
+turning one room's heating on and the other's off.
+
 Neither reports its position, so a cover carries an **assumed state**. Addresses
 taken by a blind no longer appear as switches.
 
@@ -287,11 +353,9 @@ as long-press in iNELS) runs out and the button is **still held**, it's a
 the long-press action kicks in on time. A lost open won't stick the button — a
 safety timer releases it.
 
-> ⚠️ **A condition for reliable short/long: no running Connection Server.** Its
-> periodic polling freezes the unit for a few seconds and smears the hold
-> duration (see the **Connection Server slows the response** section below). That
-> originally made this look like a dead end; under clean conditions the timing is
-> reliable.
+Short/long rests on the events arriving when they happen, so anything that
+delays them smears the hold duration — see
+[Other things talking to the unit](#other-things-talking-to-the-unit).
 
 **RF controllers stay on `press` only** — their open is lost too often, and the
 hold duration there isn't reliable. For them `press` fires on **every close
@@ -332,28 +396,43 @@ diagnostic.
 
 ### RF devices
 
-A device on an RF module (e.g. `RFKEY` — remotes) appears as its own device with
-buttons (`binary_sensor`), and the `Battery_LOW` battery status gets
-`device_class battery`.
+A device on an RF module (e.g. `RFKEY` — remotes) appears as its own device.
+Its buttons are `event` entities firing `press` (RF reports no hold, so there is
+no `long_press`).
+
+> **An RF button held down fires `press` more than once.** The module re-sends
+> "down" about every 1.5 s while the button is held, and each of those is a
+> press as far as anything here can tell — a two-second hold measured on a
+> live `RFKEY` produced two. A wired button does not do this. If an automation
+> on an RF button must not run twice, give it a cooldown (`mode: single` with
+> `max_exceeded: silent`, or a condition on the last trigger).
+
+The `Battery_LOW` battery status is a `binary_sensor` with
+`device_class battery`. An **`IBWL`** input is the exception: it mirrors whatever
+RF device is paired to it — a button or a door contact, indistinguishable in the
+export — so it stays a `binary_sensor` unless you name it `TL_`.
 
 ### What's in the export
 
 The export is **not** a list of everything — in IDM3 you choose what goes into
-it. If something's missing in Home Assistant, add it there. The integration
-checks once every 30 minutes whether the list has changed and reloads itself.
-**Reload** does it immediately.
+it. If something's missing in Home Assistant, add it there and republish: the
+integration notices the project changed on the next cycle and reloads itself
+(see [How state stays in sync](#how-state-stays-in-sync)). **Reload** does it
+immediately.
 
 ### Values
 
 Temperatures and humidities come in **multiplied by a hundred** — 2550 means
 25.50 °C. Dimmers are already in percent. `SYSTEMINTEGER` is a **raw value** that
 isn't converted in any way; what it means is up to the program that uses it.
+**Counters** (`0x0206`) report the unit's real totals.
 
 ## ⚠️ Security
 
-**The ASCII port has no authentication** — and the password on the unit won't
-change that; it only protects the web server. Anyone who reaches that TCP port
-can control the entire installation.
+**The unit's authorization is not a real barrier.** It accepts an **empty
+password** by default, which is how most units are left — so anyone who reaches
+the unit on the network can control the entire installation. Setting a password
+on the unit in IDM3 raises the bar; nothing about it is encrypted either way.
 
 Keep the unit on a separate VLAN, or at least firewall it off from untrusted
 devices and from the internet.
@@ -363,46 +442,58 @@ devices and from the internet.
 - **Covers report no position.** A cover shows an assumed state
   (open / closed / moving), not a percentage; a relay blind's end stop is
   inferred from the configured travel time, not measured.
-- **Scenes can't be triggered** — a `GET` on them returns `N`, and writing is unverified.
+- **Scenes can't be triggered** — a read on them returns no value, and writing is unverified.
 - **The binary `.otc` / `.cld` formats are not read.** They additionally contain named scenes.
-- **Both the HTTP and ASCII ports run without encryption.**
+- **Nothing is encrypted** — neither the HTTP export nor the port 9999 traffic.
 
-## ⚠️ Connection Server slows the response
+## Other things talking to the unit
 
-If the same central unit is also served by the **iNELS Connection Server**,
-expect an occasional delay. The Connection Server reaches into the unit for the
-complete state roughly **every 40–60 s**, and during that the unit **freezes the
-entire ASCII output for ~2–4 s** — it stops sending events and stops executing
-commands. Every so often a press or a toggle falls into this window and then
-reacts those 2–4 s later — and that **for all clients at once**, including the
-Connection Server itself (so it delays even itself).
+**Measured:** the unit's **configuration software connected at the same time
+costs almost nothing**. With it connected, a single read still took a median of
+**4 ms** and the whole installation **179 ms** (against 130 ms with it gone),
+writes were acknowledged in **8 ms**, and the event stream ran throughout. So you
+can leave Home Assistant running while you work on the project.
 
-- **If you don't need the Connection Server, turn it off** — the integration's
-  response is then smooth (the unit answers in ~180 ms).
-- **If you do need it**, slow down / lighten the periodic state polling in its
-  configuration (how often and how much it reads from the unit).
-
-Verified in isolation: the integration itself causes no freezing — it arises
-only when the Connection Server is also connected.
-
-> The number of clients isn't related either: the central unit has a **limited
-> number of ASCII connections**. Don't point a lot of clients at the ASCII port at
-> once — when the slots run out, the unit will accept the connection but stop
-> serving it (the HTTP export keeps running), and only a CU restart helps.
+**Not measured:** how this behaves alongside a running **iNELS Connection
+Server**. It is expected to be fine — the Connection Server reaches a unit over
+this same port for its own traffic, and a configuration client on that port
+demonstrably causes no trouble — but nobody has measured it. If you run one,
+please open an issue with what you see; that is the measurement nobody has yet.
 
 ## Diagnostics
+
+The central unit gets a **Unit status** sensor (diagnostic): whether the unit
+reports itself as *running*, *running fast* or **stopped**. A stopped unit still
+answers on the network and still holds its last values, so without this
+everything looks normal in Home Assistant while nothing in the building
+responds.
+
+Its `unit_clock` attribute is the unit's **own** date and time. The unit runs
+its heating schedules off that clock, so if it disagrees with real time —
+a whole hour is the usual case, when the unit is left on winter time — your
+heating switches at the wrong hour and nothing in Home Assistant would otherwise
+say why.
 
 **Download diagnostics** from the integration (its **⋮** menu) for a redacted
 snapshot — the config, the unit's capabilities, and every entry with its live
 value and how it was classified. It's the quickest thing to attach to a bug
 report; the host and any credentials are masked.
 
-For lower-level probing, a read-only script reports what the unit's ASCII port
-supports (add `--write` to also send a SET):
+If the integration won't set up at all, there is nothing to download
+diagnostics from. `tools/probe_is3.py` answers the same questions from outside
+Home Assistant — whether the unit responds, whether it wants a password,
+whether its data plane opens, and whether it pushes events:
 
 ```bash
-python tools/probe_is3.py <ip> <port> 0x0102000A
+python tools/probe_is3.py 192.168.1.10
 ```
+
+It only prints addresses and values, never device names, so the output is safe
+to paste into an issue. It is read-only unless you pass `--write`.
+
+And before touching a unit's firmware, `tools/compat_check.py` records what the
+integration depends on so you can tell afterwards what moved — see
+[Firmware updates can change this](#firmware-updates-can-change-this).
 
 ## Development
 
@@ -414,10 +505,14 @@ pytest
 On Windows read [CONTRIBUTING.md](CONTRIBUTING.md) first — it saves an
 afternoon (Python 3.13, a short venv path, and an `lru-dict` wheel trick).
 
-The unit also speaks other protocols the integration doesn't work with:
-**ELKONET** (binary, port 9999) and **XML-RPC** on the Connection Server
-(port 7801) — for that route there's
+The integration talks to the unit on **UDP port 9999**, the port its
+configuration software uses. The other way into a unit is **XML-RPC** on the
+iNELS Connection Server (port 7801), which this integration doesn't use; for
+that route there's
 [InelsForHass](https://github.com/JH-Soft-Technology/InelsForHass).
+
+How the protocols were established, and the limits that come with that:
+[NOTICE.md](NOTICE.md).
 
 ## License
 

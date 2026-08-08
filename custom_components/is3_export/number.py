@@ -20,7 +20,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import Is3Error
+from .errors import Is3Error
 from .const import (
     COVER_TRAVEL_TIME_MAX,
     COVER_TRAVEL_TIME_MIN,

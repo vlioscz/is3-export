@@ -20,7 +20,6 @@ from typing import Any
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_NUMBER_BASE
 from .coordinator import Is3ConfigEntry, Is3Coordinator
 from .export import (
     Is3Entry,
@@ -71,8 +70,6 @@ def build_diagnostics(
         "capabilities": {
             "reads_supported": coordinator.reads_supported,
             "connected": coordinator.client.connected,
-            "delimiter": repr(coordinator.client.delimiter),
-            "number_base": entry.data.get(CONF_NUMBER_BASE),
         },
         "header": {
             "version": header.version if header else None,

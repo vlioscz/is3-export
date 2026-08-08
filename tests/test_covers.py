@@ -9,7 +9,10 @@ import pytest
 import asyncio
 
 from homeassistant.components.cover import CoverEntityFeature
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from custom_components.is3_export.errors import Is3ConnectionError
 
 from custom_components.is3_export import cover as cover_module
 from custom_components.is3_export import number as number_module
@@ -286,6 +289,67 @@ def test_a_name_reused_across_modules_is_not_paired(named_covers) -> None:
     assert 0x010200E2 not in claimed
 
 
+# --- Two heating outputs are not a blind ------------------------------------
+#
+# A house with an upstairs and a downstairs heating zone names their output
+# relays `..._up` and `..._down`, on one module, off one base name -- which is
+# exactly the shape a blind has.  Pairing them offered a cover whose "open"
+# turned one room's heating on and the other's off.  Found on a live
+# installation; the names below have the same shape as the real ones.
+
+HEATING_LOOKALIKE = """VERSION_01-03-03_ID_GHI_NAME_Heating
+TOP_schd_up Controller_0C0007 0x0003001D 0x00000000
+Control-IN Controller_Control-IN_0C0007 0x01110001 0x00000000
+Actual-Therm-AOUT Controller_Actual-Therm-AOUT_0C0007 0x01080007 0x00000000
+Required-Therm-AOUT Controller_Required-Therm-AOUT_0C0007 0x01080008 0x00000000
+Manual-Therm-AIN Controller_Manual-Therm-AIN_0C0007 0x01120007 0x00000000
+Required-Heat-DOUT Controller_Required-Heat-DOUT_0C0007 0x01010031 0x00000000
+Control-Manual-IN Controller_Control-Manual-IN_0C0007 0x01110004 0x00000000
+TOP_schd_down Controller_0C0008 0x0003001E 0x00000000
+Control-IN Controller_Control-IN_0C0008 0x01110005 0x00000000
+Actual-Therm-AOUT Controller_Actual-Therm-AOUT_0C0008 0x0108000D 0x00000000
+Required-Therm-AOUT Controller_Required-Therm-AOUT_0C0008 0x0108000E 0x00000000
+Manual-Therm-AIN Controller_Manual-Therm-AIN_0C0008 0x01120013 0x00000000
+Required-Heat-DOUT Controller_Required-Heat-DOUT_0C0008 0x0101003B 0x00000000
+Control-Manual-IN Controller_Control-Manual-IN_0C0008 0x01110008 0x00000000
+TOP_rele_schd_up SA3-012M_RE7_0C0009 0x01020007 0x00000000
+TOP_rele_schd_down SA3-012M_RE8_0C0009 0x01020008 0x00000000
+Roleta_loznice_UP SA3-04M_RE1_0C000A 0x01020021 0x00000000
+Roleta_loznice_DOWN SA3-04M_RE2_0C000A 0x01020022 0x00000000
+"""
+
+
+@pytest.fixture(name="heating_covers")
+def heating_covers_fixture():
+    """Blinds from a site whose heating relays look like a blind pair."""
+    return {c.name: c for c in find_covers(parse_export(HEATING_LOOKALIKE))}
+
+
+def test_two_heating_outputs_are_not_paired_into_a_blind(heating_covers) -> None:
+    """Each half answers to a different zone, so they drive two rooms, not one motor."""
+    claimed = {a for c in heating_covers.values() for a in c.addresses}
+    assert 0x01020007 not in claimed
+    assert 0x01020008 not in claimed
+
+
+def test_a_real_blind_on_the_same_site_still_pairs(heating_covers) -> None:
+    """The check must not cost the site its actual blinds."""
+    assert "Roleta_loznice" in heating_covers
+    assert heating_covers["Roleta_loznice"].open.address == 0x01020021
+
+
+def test_heating_relays_stay_switches(heating_covers) -> None:
+    """Dropped from the cover, they are still perfectly good switches."""
+    export = parse_export(HEATING_LOOKALIKE)
+    claimed = {a for c in find_covers(export) for a in c.addresses}
+    relays = [
+        e for e in export.entries
+        if e.address in (0x01020007, 0x01020008) and is_switchable(e)
+    ]
+    assert len(relays) == 2
+    assert not {e.address for e in relays} & claimed
+
+
 # --- The timed release covers every relay blind, JA3 and named alike --------
 #
 # The drive principle is identical on both conventions -- a JA3 board merely
@@ -319,6 +383,79 @@ def test_a_program_blind_is_not_timed(covers) -> None:
     """The unit's blind program times its own moves; nothing to release here."""
     entity = Is3CoverEntity(_FakeCoordinator(), covers["ZALUZIE_pokoj"])
     assert not entity._timed
+
+
+# --- Stopping is one packet, not two writes ---------------------------------
+
+
+class _RecordingClient:
+    """Records what reached the unit, and how it was grouped into packets."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.packets: list[list[tuple[str, int]]] = []
+        self._fail = fail
+
+    async def async_set_many(self, writes: list[tuple[str, int]]) -> None:
+        if self._fail:
+            raise Is3ConnectionError("unreachable")
+        self.packets.append(list(writes))
+
+    async def async_set(self, address: str, value: int) -> None:  # pragma: no cover
+        raise AssertionError("stopping must not fall back to single writes")
+
+
+class _StopCoordinator:
+    config_entry = _FakeConfigEntry()
+    cover_travel_times: dict[int, float] = {}
+
+    def __init__(self, client) -> None:
+        self.client = client
+        self.noted: list[tuple[int, int]] = []
+
+    def async_note_write(self, address: int, value: int) -> None:
+        self.noted.append((address, value))
+
+
+def _stopping_cover(client) -> Is3CoverEntity:
+    cover = next(
+        c for c in find_covers(parse_export(NAMED_RELAYS)) if c.name == "Roleta_loznice"
+    )
+    entity = Is3CoverEntity(_StopCoordinator(client), cover)
+    entity.async_write_ha_state = lambda: None
+    return entity
+
+
+def test_stopping_releases_both_directions_in_one_packet() -> None:
+    """Two writes could land half-done, and a blind with one relay still closed
+    keeps running with nothing left to stop it.  The unit takes a packet whole."""
+    client = _RecordingClient()
+    entity = _stopping_cover(client)
+
+    asyncio.run(entity.async_stop_cover())
+
+    assert len(client.packets) == 1, "the stop went out as more than one packet"
+    assert client.packets[0] == [("0x01020021", 0), ("0x01020022", 0)]
+    assert entity.coordinator.noted == [(0x01020021, 0), (0x01020022, 0)]
+
+
+def test_the_timed_release_also_goes_out_as_one_packet() -> None:
+    """The auto-stop after the travel time runs the same path."""
+    client = _RecordingClient()
+    entity = _stopping_cover(client)
+    entity._stop_unsub = None
+
+    asyncio.run(entity._async_auto_stop())
+
+    assert len(client.packets) == 1
+    assert client.packets[0] == [("0x01020021", 0), ("0x01020022", 0)]
+
+
+def test_a_failed_stop_is_reported_not_swallowed() -> None:
+    """A stop that did not reach the unit must not look like it worked."""
+    entity = _stopping_cover(_RecordingClient(fail=True))
+
+    with pytest.raises(HomeAssistantError):
+        asyncio.run(entity.async_stop_cover())
 
 
 # --- Reversing --------------------------------------------------------------

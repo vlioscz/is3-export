@@ -3,45 +3,77 @@
     "step": {
       "user": {
         "title": "iNELS central unit (CU3)",
-        "description": "First enable the third-party protocol in iNELS IDM3 (Central unit configuration → Third part setting), note the port, and tick the events the unit should send. Nothing works until that is done.\n\nThe port, delimiter and number base below must match what is set there. Leave the export file path empty to download the export from the unit. Newer firmware (e.g. CU3-08M) does not serve the export over HTTP — save the iNELS3 export in IDM3 and drop the file into the upload field instead. The iNELS project password does not affect this — where the unit serves the export, it does so without authentication.",
+        "description": "Enter the unit's address. Nothing has to be enabled in iNELS IDM3 first — the integration uses the same interface IDM3 itself does, which every central unit answers on.\n\nLeave the export file path empty to download the device list from the unit. Firmware that does not serve it over HTTP has no export to download — save the iNELS3 export in IDM3 and drop the file into the upload field instead.",
         "data": {
           "host": "Host",
-          "port": "ASCII port (from IDM3)",
+          "port": "Port",
+          "password": "Central unit password",
           "export_file": "Export file path (leave empty to download)",
-          "export_upload": "Export file upload (drop the .is3 file here)",
-          "delimiter": "Delimiter (from IDM3)",
-          "number_base": "Number base (from IDM3)"
+          "export_upload": "Export file upload (drop the .is3 file here)"
+        },
+        "data_description": {
+          "port": "Only change this if the unit is reached through a tunnel or a forwarded port.",
+          "password": "The password set on the central unit in IDM3. Leave empty if none is set, which is the usual case."
         }
       },
       "reconfigure": {
         "title": "iNELS central unit (CU3)",
-        "description": "Update how Home Assistant connects to the unit. The port, delimiter and number base must match the third-party (ASCII) settings in iNELS IDM3. Leave the export file path empty to download the export from the unit, or drop a fresh export file into the upload field.",
+        "description": "Update how Home Assistant reaches the unit. Leave the export file path empty to download the device list from the unit, or drop a fresh export file into the upload field.",
         "data": {
           "host": "Host",
-          "port": "ASCII port (from IDM3)",
+          "port": "Port",
+          "password": "Central unit password",
           "export_file": "Export file path (leave empty to download)",
-          "export_upload": "Export file upload (drop the .is3 file here)",
-          "delimiter": "Delimiter (from IDM3)",
-          "number_base": "Number base (from IDM3)"
+          "export_upload": "Export file upload (drop the .is3 file here)"
+        },
+        "data_description": {
+          "port": "Only change this if the unit is reached through a tunnel or a forwarded port.",
+          "password": "The password set on the central unit in IDM3. Leave empty if none is set."
+        }
+      },
+      "reauth_confirm": {
+        "title": "iNELS central unit (CU3)",
+        "description": "The central unit is no longer accepting the stored password. Enter the current one.",
+        "data": {
+          "password": "Central unit password"
+        },
+        "data_description": {
+          "password": "The password set on the central unit in IDM3. Leave empty if none is set."
         }
       }
     },
     "error": {
-      "cannot_connect": "Could not reach the ASCII port. Check that the third-party protocol is enabled in IDM3 and that the port matches.",
-      "invalid_auth": "This unit blocks the export download. Enter a path to a local export file instead.",
+      "cannot_connect": "Could not reach the central unit. Check the address, and that Home Assistant can reach the unit's network.",
+      "invalid_auth": "The central unit refused that password.",
+      "password_required": "This central unit has a password set. Enter it.",
+      "export_protected": "This unit will not hand over its export. Upload the export file, or enter the path to a local copy.",
       "invalid_export": "The export could not be read or contains no entries",
       "unknown": "Unexpected error"
     },
     "abort": {
       "already_configured": "This central unit is already configured",
       "reconfigure_successful": "The connection settings were updated",
+      "reauth_successful": "Re-authentication was successful",
       "wrong_unit": "That address is a different central unit than this entry. Add it as a new integration instead."
     }
   },
   "issues": {
-    "reads_unsupported": {
-      "title": "IS3 Export can't read the unit's state",
-      "description": "The central unit did not answer a read using the {delimiter} delimiter and {number_base} numbers, so entities show an assumed state instead of the live value.\n\nOpen the third-party (ASCII) settings in iNELS IDM3, make the delimiter and number base match, then remove and re-add the integration with the corrected values."
+    "export_protected": {
+      "title": "IS3 Export can't download the device list",
+      "description": "The central unit will not serve its export file, so Home Assistant cannot refresh the list of devices.\n\nSave the iNELS3 export from IDM3 and upload it: Settings → Devices & services → IS3 Export → ⋮ → Reconfigure. The unit's own password does not affect this."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "unit_status": {
+        "name": "Unit status",
+        "state": {
+          "stopped": "Stopped",
+          "running": "Running",
+          "running_fast": "Running (fast)",
+          "unknown": "Unknown"
+        }
+      }
     }
   }
 }

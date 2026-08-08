@@ -15,7 +15,6 @@ MODEL: Final = "iNELS central unit (CU3)"
 
 CONF_EXPORT_FILE: Final = "export_file"
 CONF_EXPORT_UPLOAD: Final = "export_upload"
-CONF_DELIMITER: Final = "delimiter"
 
 # An export dropped into the setup form is kept here, under the Home Assistant
 # config folder, so a config entry always holds a plain file path whichever way
@@ -29,45 +28,24 @@ SAVED_EXPORT_DIR: Final = "is3_export"
 DEFAULT_HTTP_PORT: Final = 80
 EXPORT_URL_PATH: Final = "/immfiles/export.is3"
 
-# These three mirror the "Third part setting" page in iNELS IDM3, where the
-# installer configures the ASCII protocol.  They must be set to match, or the
-# unit and the integration will not understand each other.
-
-# Every delimiter IDM3 offers, in the order its dropdown lists them.  IDM3 shows
-# the choice as an ASCII code, e.g. [32] for a space, so the codes are shown here
-# too and the two screens can be compared at a glance.
+# --- Retired with the ASCII transport (0.2.0) --------------------------------
 #
-# The set is exactly what the dropdown contains: characters that cannot occur in
-# an address or a value.  Digits, `+`, `-`, `.`, `%` and `x` are absent for that
-# reason.
-DELIMITER_SPACE: Final = " "
-DELIMITER_SEMICOLON: Final = ";"
-
-_DELIMITER_CHARS: Final = (
-    ' "#$&\'()*,/:;<=?@[\\]^_`{|}~'
-)
-
-DELIMITERS: Final = {
-    char: (f"Space [32]" if char == " " else f"{char}  [{ord(char)}]")
-    for char in _DELIMITER_CHARS
-}
-
-# IDM3 calls this "Číselná soustava" / number base.
-BASE_HEX: Final = "hex"
-BASE_DEC: Final = "dec"
-NUMBER_BASES: Final = {BASE_HEX: "Hexadecimal", BASE_DEC: "Decimal"}
-
+# These two named the settings that configured the old line-based protocol: how
+# its fields were separated, and which base its numbers were written in.  The
+# binary protocol has neither.  Only the stored keys survive, and only so the
+# config-entry migration can find them and take them out of entries written by
+# 0.1.x.  Nothing else may use them, and they go once no 0.1.x entry is left.
+CONF_DELIMITER: Final = "delimiter"
 CONF_NUMBER_BASE: Final = "number_base"
 
-# IDM3's "Režim" / mode is not configured here. "Remote control + IDM" adds an id
-# field to pushed events, and that is detected from the field count instead, so
-# both modes work without the user having to say which one is set.
+# --- Connection ---------------------------------------------------------------
 
-# The ASCII port the central unit listens on.  Newer IDM3 versions default it to
-# 22272 (older ones used 1111); it stays configurable in IDM3, so the field is
-# editable, but 22272 matches a current install out of the box.  This project's
-# own unit used 1111 in 2022 and 22272 from 2024.
-DEFAULT_PORT: Final = 22272
+# The UDP port the unit answers on.  It is the one the configuration software
+# connects to, so it is open on every generation without anything being enabled
+# first -- unlike the old ASCII port, which had to be switched on by hand and
+# which the newest units never open at all.  It stays editable because remote
+# installs reach the unit through a tunnel or a forwarded port.
+DEFAULT_PORT: Final = 9999
 
 DEFAULT_SCAN_INTERVAL: Final = timedelta(seconds=30)
 

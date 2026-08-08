@@ -2,33 +2,39 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CONF_HOST,
+    CONF_PASSWORD,
     CONF_PORT,
     Platform,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
-from .api import Is3Client, Is3ConnectionError
+from .client import Is3Client
+from .errors import Is3AuthError, Is3ConnectionError
 from .export import Is3Export, expected_entities
 from .const import (
-    BASE_HEX,
     CONF_DELIMITER,
     CONF_EXPORT_FILE,
     CONF_NUMBER_BASE,
     DEFAULT_HTTP_PORT,
     DEFAULT_PORT,
-    DELIMITER_SPACE,
     DOMAIN,
     MANUFACTURER,
     MODEL,
 )
 from .coordinator import Is3ConfigEntry, Is3Coordinator
-from .issues import async_clear_issues, async_update_reads_issue
+from .issues import async_clear_issues
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -42,6 +48,56 @@ PLATFORMS: list[Platform] = [
     Platform.SENSOR,
     Platform.SWITCH,
 ]
+
+
+def migrated_data(data: Mapping[str, Any]) -> dict[str, Any]:
+    """An 0.1.x entry's settings, rewritten for the binary protocol.
+
+    Kept separate from the migration itself so it can be read and tested as what
+    it is: a pure rewrite of one dict.  It is idempotent, because a user may
+    have reconfigured an entry midway through an upgrade.
+    """
+    updated = dict(data)
+    # Every stored port is an ASCII one -- 22272, 1111, or whatever was typed
+    # into IDM3 -- and none of them mean anything to the binary transport, which
+    # always uses the same port.  Rewriting only the known two would strand
+    # anyone who had changed it.
+    updated[CONF_PORT] = DEFAULT_PORT
+    # An empty password authorizes a unit that has none set, which is the
+    # ordinary case; anyone with one set is asked for it by the reauth dialog.
+    updated.setdefault(CONF_PASSWORD, "")
+    updated.pop(CONF_DELIMITER, None)
+    updated.pop(CONF_NUMBER_BASE, None)
+    return updated
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Move a config entry written by 0.1.x onto the 0.2.0 settings.
+
+    The unique id is deliberately untouched: it is what entity ids, areas and
+    recorder history hang off, and the whole point of migrating rather than
+    asking people to set the integration up again is that none of that moves.
+    """
+    _LOGGER.debug(
+        "Migrating %s from version %s.%s",
+        entry.title,
+        entry.version,
+        entry.minor_version,
+    )
+    if entry.version > 2:
+        # Written by a newer release than this one: refuse rather than guess at
+        # settings we do not know the shape of.
+        return False
+
+    if entry.version == 1:
+        hass.config_entries.async_update_entry(
+            entry, data=migrated_data(entry.data), version=2, minor_version=1
+        )
+        # The delimiter/number-base repair card describes settings that no
+        # longer exist, and nothing else would ever take it down.
+        async_clear_issues(hass, entry.entry_id)
+
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: Is3ConfigEntry) -> bool:
@@ -61,8 +117,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Is3ConfigEntry) -> bool:
     client = Is3Client(
         host=entry.data[CONF_HOST],
         port=entry.data.get(CONF_PORT, DEFAULT_PORT),
-        delimiter=entry.data.get(CONF_DELIMITER, DELIMITER_SPACE),
-        number_base=entry.data.get(CONF_NUMBER_BASE, BASE_HEX),
+        password=entry.data.get(CONF_PASSWORD, ""),
         on_event=handle_event,
         on_reconnect=handle_reconnect,
     )
@@ -78,23 +133,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: Is3ConfigEntry) -> bool:
         http_port=DEFAULT_HTTP_PORT,
     )
 
+    # A failed connect never registers the unload hook below, and an abandoned
+    # client keeps a reconnect loop running against the unit -- which Home
+    # Assistant would then multiply by retrying setup.  So close it by hand on
+    # both failure paths.
     try:
         await client.async_connect()
+    except Is3AuthError as err:
+        await client.async_close()
+        raise ConfigEntryAuthFailed(str(err)) from err
     except Is3ConnectionError as err:
+        await client.async_close()
         raise ConfigEntryNotReady(str(err)) from err
 
     entry.async_on_unload(client.async_close)
 
     await coordinator.async_detect_capabilities()
-    # A delimiter or number base that does not match the unit leaves reads
-    # unanswered; raise a repair card so it is not just a line in the log.
-    async_update_reads_issue(
-        hass,
-        entry.entry_id,
-        reads_supported=coordinator.reads_supported,
-        delimiter=entry.data.get(CONF_DELIMITER, DELIMITER_SPACE),
-        number_base=entry.data.get(CONF_NUMBER_BASE, BASE_HEX),
-    )
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator

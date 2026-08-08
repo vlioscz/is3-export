@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 
 import custom_components.is3_export.coordinator as coordinator_module
-from custom_components.is3_export.api import Is3Error
+from custom_components.is3_export.errors import Is3Error
 from custom_components.is3_export.coordinator import Is3Coordinator
 
 ADDR = 0x0102000A

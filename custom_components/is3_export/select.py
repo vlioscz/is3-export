@@ -16,7 +16,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import Is3Error
+from .errors import Is3Error
 from .const import DOMAIN, MANUFACTURER, MODEL
 from .coordinator import Is3ConfigEntry, Is3Coordinator
 from .export import PLAN_OPTIONS, PLAN_VALUES, Is3Controller, find_controllers

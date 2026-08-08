@@ -16,9 +16,13 @@ from homeassistant.const import (
     UnitOfVolume,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .const import DOMAIN
 from .coordinator import Is3ConfigEntry, Is3Coordinator
+from .protocol import UNIT_STATES
 from .entity import Is3Entity
 from .export import (
     PLATFORM_SENSOR,
@@ -90,13 +94,69 @@ async def async_setup_entry(
     entry: Is3ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Create a sensor for every analog reading in the export file."""
+    """Create a sensor for every analog reading, plus the unit's own status."""
     coordinator = entry.runtime_data
     async_add_entities(
-        Is3Sensor(coordinator, item)
-        for item in coordinator.data.export.entries
-        if platform_of(item) == PLATFORM_SENSOR
+        [
+            *(
+                Is3Sensor(coordinator, item)
+                for item in coordinator.data.export.entries
+                if platform_of(item) == PLATFORM_SENSOR
+            ),
+            Is3UnitStatusSensor(coordinator),
+        ]
     )
+
+
+class Is3UnitStatusSensor(CoordinatorEntity[Is3Coordinator], SensorEntity):
+    """How the central unit says it is running.
+
+    A unit that has been stopped still answers on the network and still holds
+    the last values it read, so from Home Assistant everything looks normal
+    while nothing in the building responds.  This is the one place that says
+    so.  Its clock comes along as an attribute, because the unit runs its own
+    heating schedules off it -- a unit an hour out does the right thing at the
+    wrong time, and there is otherwise no way to see that from here.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "unit_status"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = [*UNIT_STATES.values(), "unknown"]
+
+    def __init__(self, coordinator: Is3Coordinator) -> None:
+        """Attach the sensor to the central unit's own device."""
+        super().__init__(coordinator)
+        config_entry_id = coordinator.config_entry.entry_id
+        self._attr_unique_id = f"{config_entry_id}_unit_status"
+        self._attr_device_info = {"identifiers": {(DOMAIN, config_entry_id)}}
+
+    async def async_added_to_hass(self) -> None:
+        """Wake when the unit's own status changes.
+
+        The coordinator does not wake entities wholesale -- every other entity
+        follows its own address -- so this one subscribes to the status
+        specifically.
+        """
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self.coordinator.async_add_unit_state_listener(self.async_write_ha_state)
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """The run state, or None until the unit has been asked."""
+        state = self.coordinator.unit_state
+        return state.state if state is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str] | None:
+        """The unit's own clock, when it reports one."""
+        state = self.coordinator.unit_state
+        if state is None or state.clock is None:
+            return None
+        return {"unit_clock": state.clock}
 
 
 class Is3Sensor(Is3Entity, SensorEntity):

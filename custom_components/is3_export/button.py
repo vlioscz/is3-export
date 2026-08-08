@@ -17,7 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .api import Is3Error
+from .errors import Is3Error
 from .coordinator import Is3ConfigEntry
 from .entity import Is3Entity
 from .export import PLATFORM_BUTTON, find_covers, platform_of

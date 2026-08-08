@@ -47,7 +47,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import Is3Error
+from .errors import Is3Error
 from .const import DEFAULT_COVER_TRAVEL_TIME, DOMAIN, MANUFACTURER, MODEL
 from .coordinator import Is3ConfigEntry, Is3Coordinator
 from .export import Is3Cover, find_covers
@@ -59,9 +59,10 @@ OFF = 0
 PULSE = 1
 
 # How long to wait after releasing one direction before engaging the other.
-# Chosen rather than measured: the two relays are interlocked in hardware, and
-# each command travels on its own connection, so the release needs to have
-# landed before the opposite direction is asked for.
+# The reason is mechanical, not a matter of getting the commands there: the unit
+# would take both in one packet and apply them together, but slamming a blind
+# motor from one direction straight into the other is hard on the mechanism.
+# So the pause is deliberate, and chosen rather than measured.
 REVERSE_DELAY = 0.5
 
 # A relay source drives its contacts directly (it needs releasing after a run);
@@ -208,11 +209,10 @@ class Is3CoverEntity(CoordinatorEntity[Is3Coordinator], CoverEntity):
         if self.cover.stop is not None:
             await self._async_write(self.cover.stop, PULSE)
             return
-        # No stop bit: releasing a relay stops that direction. Both are
+        # No stop bit: releasing a relay stops that direction.  Both are
         # released rather than only the one believed to be running, because a
         # missed event would leave the other stuck on.
-        await self._async_write(self.cover.open, OFF)
-        await self._async_write(self.cover.close, OFF)
+        await self._async_release_both()
 
     async def async_open_cover_tilt(self, **kwargs: Any) -> None:
         """Angle the slats up."""
@@ -237,8 +237,29 @@ class Is3CoverEntity(CoordinatorEntity[Is3Coordinator], CoverEntity):
     async def _async_auto_stop(self, _now: Any = None) -> None:
         """Release both directions once a timed move's run has elapsed."""
         self._stop_unsub = None
-        await self._async_write(self.cover.open, OFF)
-        await self._async_write(self.cover.close, OFF)
+        await self._async_release_both()
+
+    async def _async_release_both(self) -> None:
+        """Drop both directions, in one packet.
+
+        Stopping is the one place where a half-finished command is dangerous:
+        as two separate writes, the first landing and the second failing leaves
+        the motor running with nothing left to stop it.  The unit takes both in
+        a single packet, so that outcome does not exist.
+        """
+        try:
+            await self.coordinator.client.async_set_many(
+                [
+                    (self.cover.open.address_hex, OFF),
+                    (self.cover.close.address_hex, OFF),
+                ]
+            )
+        except Is3Error as err:
+            raise HomeAssistantError(f"Cannot stop {self._attr_name}: {err}") from err
+
+        for entry in (self.cover.open, self.cover.close):
+            self.coordinator.async_note_write(entry.address, OFF)
+        self.async_write_ha_state()
 
     async def _async_drive(self, engage, release) -> None:
         """Start moving one way.
@@ -255,9 +276,9 @@ class Is3CoverEntity(CoordinatorEntity[Is3Coordinator], CoverEntity):
             return
 
         await self._async_write(release, OFF)
-        # Give the module a moment to drop the interlock before the opposite
-        # direction arrives on a fresh connection. Reversing a blind motor
-        # instantly is also hard on the mechanism.
+        # Let the motor come to rest before driving it the other way; see
+        # REVERSE_DELAY. This one pause is deliberately not collapsed into a
+        # single packet, even though the unit would accept one.
         await asyncio.sleep(REVERSE_DELAY)
         await self._async_write(engage, ON)
 

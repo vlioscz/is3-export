@@ -1,168 +1,213 @@
 #!/usr/bin/env python3
-"""Probe an iNELS central unit to settle what its ASCII port supports.
+"""Probe an iNELS central unit on UDP 9999, to settle what it actually does.
 
-Two independent real installations disagree about the wire format:
+Run this from a machine on the same network as the unit and paste the output
+into a bug report.  It answers the questions that otherwise take a round of
+guessing: does the unit answer at all, does it want a password, does its data
+plane open, and does it push events.
 
-* the scripts from this installation write ``SET 0x0102000A 1 \\r\\n``
-  (space separated, trailing space)
-* ``abetka/InelsHA`` writes ``SET;0x0102000A;1\\r\\n`` and reads with
-  ``GET;<address>\\r\\n`` (semicolon separated)
-
-Rather than guess, this script tries both and reports what the unit actually
-does. It is read-only by default: it never sends SET unless you pass --write.
+Read-only by default -- it never writes unless you pass ``--write``, and then
+only to the one address you name.
 
 Usage::
 
-    python probe_is3.py 192.168.1.10 22272 0x0102000A
-    python probe_is3.py 192.168.1.10 22272 0x0102000A --write
+    python probe_is3.py 192.168.1.10
+    python probe_is3.py 192.168.1.10 --password secret
+    python probe_is3.py 192.168.1.10 --read 0x01050001
+    python probe_is3.py 192.168.1.10 --write 0x0102000A 1
 
-Run it from a machine on the same network as the unit and paste the output back.
+It prints addresses and values, never device names, so the output is safe to
+share.
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
+import hashlib
 import socket
+import struct
 import sys
+import time
 
-TIMEOUT = 5.0
-READ_SIZE = 4096
+PROTOCOL_VERSION = bytes.fromhex("81631F55DB182AAB")
+HEADER_LEN = 82
+NO_VALUE = 0x7FFFFFF0
 
-
-def _banner(text: str) -> None:
-    """Print a section heading."""
-    print(f"\n{'=' * 60}\n{text}\n{'=' * 60}")
-
-
-def _exchange(host: str, port: int, payload: bytes, wait: float = TIMEOUT) -> bytes:
-    """Send one payload on a fresh connection and return whatever comes back."""
-    with socket.create_connection((host, port), timeout=TIMEOUT) as sock:
-        sock.settimeout(wait)
-        sock.sendall(payload)
-        try:
-            return sock.recv(READ_SIZE)
-        except socket.timeout:
-            return b""
+# The checksum model, same as the integration's (see checksum.py).
+_T = (418, 580, 1160, 2064, 4145, 8290, 16580, 32904,
+      17, 51, 102, 204, 152, 48, 96, 209)
+_K = {82: 56415, 90: 17892, 245: 8734}
+_REV8 = [int(f"{i:08b}"[::-1], 2) for i in range(256)]
 
 
-def probe_reads(host: str, port: int, address: str) -> None:
-    """Try every plausible spelling of a read command."""
-    _banner("1. READ -- which GET syntax does the unit answer?")
-
-    candidates = {
-        "GET;<addr>        (abetka/InelsHA)": f"GET;{address}\r\n",
-        "GET <addr>        (space, like the local SET scripts)": f"GET {address} \r\n",
-        "GET <addr>        (space, no trailing space)": f"GET {address}\r\n",
-        "GET;<addr>;       (trailing delimiter)": f"GET;{address};\r\n",
-    }
-
-    for label, command in candidates.items():
-        payload = command.encode("ascii")
-        try:
-            reply = _exchange(host, port, payload)
-        except OSError as err:
-            print(f"  [error]   {label}\n            {err}")
-            continue
-
-        if reply:
-            print(f"  [ANSWER]  {label}")
-            print(f"            sent:  {payload!r}")
-            print(f"            reply: {reply!r}")
-        else:
-            print(f"  [silence] {label}")
+def _apply_t(x: int) -> int:
+    out = 0
+    for r in range(16):
+        if bin(_T[r] & x).count("1") & 1:
+            out |= 1 << r
+    return out
 
 
-def probe_events(host: str, port: int, seconds: float) -> None:
-    """Hold the socket open and see whether the unit pushes state changes."""
-    _banner(f"2. PUSH -- does the unit send EVENT lines? (listening {seconds:.0f}s)")
-    print("  Toggle a light on the wall now, so there is something to report.\n")
+def _k_of_len(length: int) -> int:
+    known = max(k for k in _K if k <= length) if any(k <= length for k in _K) else min(_K)
+    reg = _K[known]
+    for _ in range(length - known):
+        reg = _apply_t(reg)
+    return reg
 
-    try:
-        with socket.create_connection((host, port), timeout=TIMEOUT) as sock:
-            sock.settimeout(seconds)
+
+def crc(body: bytes) -> int:
+    reg = 0
+    for b in body:
+        reg = _apply_t(reg) ^ ((_REV8[b] << 8) & 0xFFFF)
+    return _k_of_len(len(body)) ^ reg
+
+
+def build(typ, i1, i2, data=b"", token=b"\x00" * 8, pid=0) -> bytes:
+    body = (
+        PROTOCOL_VERSION + b"\x00" * 56 + token
+        + struct.pack(">H", HEADER_LEN + len(data) + 2)
+        + struct.pack(">I", pid)
+        + bytes((0x01, typ, i1, i2)) + data
+    )
+    return body + struct.pack("<H", crc(body))
+
+
+class Probe:
+    """One UDP conversation with the unit."""
+
+    def __init__(self, host: str, port: int, password: str, timeout: float) -> None:
+        self.host, self.port, self.password, self.timeout = host, port, password, timeout
+        self.token = b"\x00" * 8
+        self.pid = 0
+        family = socket.AF_INET6 if ":" in host else socket.AF_INET
+        self.sock = socket.socket(family, socket.SOCK_DGRAM)
+        self.sock.settimeout(timeout)
+
+    def ask(self, typ, i1, i2, data=b"", auth=False):
+        """Send one request and wait for the matching reply."""
+        self.pid += 2
+        token = self.token if auth else b"\x00" * 8
+        self.sock.sendto(build(typ, i1, i2, data, token, self.pid), (self.host, self.port))
+        deadline = time.time() + self.timeout
+        while time.time() < deadline:
             try:
-                data = sock.recv(READ_SIZE)
+                raw, _ = self.sock.recvfrom(4096)
             except socket.timeout:
-                print("  [silence] nothing arrived -- polling with GET is required")
-                return
-    except OSError as err:
-        print(f"  [error]   {err}")
-        return
+                return None
+            if len(raw) < HEADER_LEN + 2 or raw[:8] != PROTOCOL_VERSION:
+                continue
+            if (raw[79], raw[80], raw[81]) != (typ, i1, i2):
+                continue  # an event or a straggler; keep waiting
+            return raw[78], raw[82:-2]
+        return None
 
-    print(f"  [PUSH]    unit sends unsolicited data: {data!r}")
-
-
-def probe_write(host: str, port: int, address: str) -> None:
-    """Send the SET command that is already known to work on this unit."""
-    _banner("3. WRITE -- the form the local scripts use")
-
-    command = f"SET {address} 1 \r\n".encode("ascii")
-    print(f"  sending: {command!r}")
-    try:
-        reply = _exchange(host, port, command, wait=2.0)
-    except OSError as err:
-        print(f"  [error]   {err}")
-        return
-
-    print(f"  reply:   {reply!r}" if reply else "  reply:   (none, as expected)")
-    print("  --> check whether the output actually switched")
+    def close(self) -> None:
+        self.sock.close()
 
 
-def probe_http_export(host: str) -> None:
-    """Check the documented export URL, which would remove the manual copy step."""
-    _banner("4. EXPORT over HTTP -- can the file be fetched instead of copied?")
-
-    import urllib.error
-    import urllib.request
-
-    paths = [
-        "/immfiles/export.imm",
-        "/immfiles/export.is3",
-        "/export.imm",
-        "/export.is3",
-    ]
-    for http_port in (80, 8080):
-        for path in paths:
-            url = f"http://{host}:{http_port}{path}"
-            try:
-                with urllib.request.urlopen(url, timeout=TIMEOUT) as response:
-                    body = response.read(200)
-                print(f"  [FOUND]   {url}")
-                print(f"            first bytes: {body[:120]!r}")
-            except urllib.error.HTTPError as err:
-                print(f"  [{err.code}]     {url}")
-            except OSError:
-                print(f"  [no]      {url}")
-
-
-def main() -> int:
-    """Run the probes selected on the command line."""
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("host", help="IP address of the central unit")
-    parser.add_argument("port", type=int, help="ASCII port, e.g. 22272 or 1111")
-    parser.add_argument("address", help="an address to read, e.g. 0x0102000A")
+    parser.add_argument("host")
+    parser.add_argument("--port", type=int, default=9999)
+    parser.add_argument("--password", default="")
+    parser.add_argument("--timeout", type=float, default=3.0)
+    parser.add_argument("--read", metavar="ADDRESS", help="also read this address")
+    parser.add_argument("--listen", type=float, default=5.0, metavar="SECONDS")
     parser.add_argument(
-        "--write",
-        action="store_true",
-        help="also send SET <address> 1, which will switch that output on",
+        "--write", nargs=2, metavar=("ADDRESS", "VALUE"),
+        help="write a value, then read it back (the only thing that changes anything)",
     )
-    parser.add_argument(
-        "--listen",
-        type=float,
-        default=15.0,
-        help="seconds to wait for pushed events (default: 15)",
-    )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    print(f"Probing {args.host}:{args.port}, address {args.address}")
+    probe = Probe(args.host, args.port, args.password, args.timeout)
+    print(f"probing {args.host}:{args.port} (UDP)")
 
-    probe_reads(args.host, args.port, args.address)
-    probe_events(args.host, args.port, args.listen)
+    reply = probe.ask(0x40, 0x03, 0x00)
+    if reply is None:
+        print("  no answer at all -- wrong address, a firewall, or the unit is down")
+        probe.close()
+        return 1
+    _, data = reply
+    state = {0x20: "FastRun", 0x10: "Run", 0x00: "Stop"}.get(data[0], hex(data[0]))
+    print(f"  unit answers.  run state: {state}")
+
+    reply = probe.ask(0x40, 0x06, 0x00)
+    if reply is not None and reply[1]:
+        print(f"  password set on the unit: {'yes' if reply[1][0] else 'no'}")
+
+    probe.ask(0x70, 0x03, 0x02, bytes.fromhex("000000000000000002"))
+    probe.ask(0x40, 0x05, 0x00)
+    body = b"\x01" + hashlib.sha1(args.password.encode()).digest()
+    reply = probe.ask(0x40, 0x06, 0x01, body)
+    if reply is None or reply[0] & 0x80 or len(reply[1]) < 8:
+        print("  authorization REFUSED -- wrong password")
+        probe.close()
+        return 1
+    probe.token = reply[1][:8]
+    print("  authorized")
+
+    # The data plane is the real test: a unit issues a token and then ignores
+    # requests for values when the password was not the one it wanted.
+    address = int(args.read, 16) if args.read else 0x01020001
+    reply = probe.ask(0x01, 0x01, 0x00, b"\x01" + struct.pack(">I", address), auth=True)
+    if reply is None:
+        print("  data plane SILENT -- authorized, but the unit answers no reads.")
+        print("  That is what a wrong password looks like on this protocol.")
+        probe.close()
+        return 1
+    _, data = reply
+    if len(data) >= 5:
+        raw = struct.unpack(">i", data[1:5])[0]
+        shown = "no value" if (raw & 0xFFFFFFFF) >= NO_VALUE else raw
+        print(f"  read {address:#010x} -> {shown}")
+    print("  data plane OPEN")
+
+    probe.ask(0x04, 0x02, 0x00, auth=True)
+    print(f"  listening {args.listen:.0f}s for pushed events...")
+    seen: dict[int, int] = {}
+    deadline = time.time() + args.listen
+    probe.sock.settimeout(0.5)
+    while time.time() < deadline:
+        try:
+            raw, _ = probe.sock.recvfrom(4096)
+        except socket.timeout:
+            continue
+        if len(raw) < HEADER_LEN + 2 or raw[79] != 0x04 or raw[80] != 0x01:
+            continue
+        payload = raw[82:-2]
+        for i in range(payload[0] if payload else 0):
+            off = 1 + 8 * i
+            if off + 8 > len(payload):
+                break
+            addr = struct.unpack(">I", payload[off : off + 4])[0]
+            seen[addr] = seen.get(addr, 0) + 1
+    print(f"  {sum(seen.values())} events from {len(seen)} addresses")
+    for addr, count in sorted(seen.items(), key=lambda kv: -kv[1])[:5]:
+        print(f"     {addr:#010x} x{count}")
+    if not seen:
+        print("     (none -- normal on a quiet installation, but if this stays")
+        print("      empty while something is changing, events are not arriving)")
+
     if args.write:
-        probe_write(args.host, args.port, args.address)
-    probe_http_export(args.host)
+        probe.sock.settimeout(args.timeout)
+        target, value = int(args.write[0], 16), int(args.write[1])
+        print(f"  writing {value} to {target:#010x}")
+        reply = probe.ask(
+            0x02, 0x01, 0x00,
+            b"\x01" + struct.pack(">I", target) + struct.pack(">i", value),
+            auth=True,
+        )
+        ok = reply is not None and not (reply[0] & 0x80)
+        print(f"     {'acknowledged' if ok else 'REFUSED'}")
+        time.sleep(1.5)
+        reply = probe.ask(0x01, 0x01, 0x00, b"\x01" + struct.pack(">I", target), auth=True)
+        if reply is not None and len(reply[1]) >= 5:
+            back = struct.unpack(">i", reply[1][1:5])[0]
+            print(f"     reads back as {back} -> {'took' if back == value else 'DID NOT take'}")
 
-    _banner("Done -- paste this whole output back")
+    probe.close()
     return 0
 
 

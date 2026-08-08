@@ -1,8 +1,8 @@
-"""A mismatched delimiter/number base becomes a repair card, not a log line.
+"""Repair cards: raised per unit, and the retired one taken down on upgrade.
 
-When the unit does not answer reads the integration falls back to assumed
-states, which is easy to miss.  The coordinator's ``reads_supported`` drives a
-repair issue: raised while reads fail, cleared once they work.
+A refused password is not here -- Home Assistant's own re-authentication dialog
+owns that.  What is left is the failure with no credential to collect: the unit
+will not serve its export, and the answer is to upload one.
 """
 
 from __future__ import annotations
@@ -31,33 +31,26 @@ def _patch(monkeypatch) -> _Registry:
     return registry
 
 
-def test_raises_a_card_when_reads_are_unsupported(monkeypatch) -> None:
+def test_raises_a_card_when_the_export_is_blocked(monkeypatch) -> None:
     registry = _patch(monkeypatch)
 
-    issues.async_update_reads_issue(
-        None, "abc", reads_supported=False, delimiter=" ", number_base="hex"
-    )
+    issues.async_update_export_issue(None, "abc", blocked=True)
 
     assert registry.deleted == []
     assert len(registry.created) == 1
     issue_id, kwargs = registry.created[0]
-    assert issue_id == "reads_unsupported_abc"
+    assert issue_id == "export_protected_abc"
     assert kwargs["is_fixable"] is False
-    assert kwargs["translation_key"] == "reads_unsupported"
-    # the delimiter and base are shown as their friendly labels
-    assert kwargs["translation_placeholders"]["delimiter"] == "Space [32]"
-    assert kwargs["translation_placeholders"]["number_base"] == "Hexadecimal"
+    assert kwargs["translation_key"] == "export_protected"
 
 
-def test_clears_the_card_once_reads_work(monkeypatch) -> None:
+def test_clears_the_card_once_the_export_arrives(monkeypatch) -> None:
     registry = _patch(monkeypatch)
 
-    issues.async_update_reads_issue(
-        None, "abc", reads_supported=True, delimiter=" ", number_base="hex"
-    )
+    issues.async_update_export_issue(None, "abc", blocked=False)
 
     assert registry.created == []
-    assert registry.deleted == ["reads_unsupported_abc"]
+    assert registry.deleted == ["export_protected_abc"]
 
 
 def test_each_unit_gets_its_own_card(monkeypatch) -> None:
@@ -66,4 +59,19 @@ def test_each_unit_gets_its_own_card(monkeypatch) -> None:
     issues.async_clear_issues(None, "unit-one")
     issues.async_clear_issues(None, "unit-two")
 
-    assert registry.deleted == ["reads_unsupported_unit-one", "reads_unsupported_unit-two"]
+    assert "export_protected_unit-one" in registry.deleted
+    assert "export_protected_unit-two" in registry.deleted
+
+
+def test_the_retired_card_is_taken_down(monkeypatch) -> None:
+    """0.1.x raised a card about settings that no longer exist.
+
+    The issue registry keeps an issue after the integration stops raising it,
+    so upgrading would otherwise leave every existing user with a permanent
+    card telling them to fix a delimiter the integration no longer has.
+    """
+    registry = _patch(monkeypatch)
+
+    issues.async_clear_issues(None, "abc")
+
+    assert "reads_unsupported_abc" in registry.deleted

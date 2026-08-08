@@ -3,45 +3,77 @@
     "step": {
       "user": {
         "title": "Centrální jednotka iNELS (CU3)",
-        "description": "Nejdřív povol protokol třetích stran v iNELS IDM3 (Konfigurace centrální jednotky → Third part setting), poznamenej si port a zaškrtej události, které má jednotka posílat. Bez toho nebude fungovat nic.\n\nPort, oddělovač a číselná soustava níže musí odpovídat tomu, co je nastavené tam. Když necháš cestu k exportu prázdnou, stáhne se z jednotky. Novější firmware (např. CU3-08M) export přes HTTP neservíruje — ulož iNELS3 export v IDM3 a přetáhni soubor do pole pro nahrání. Heslo projektu iNELS na to nemá vliv — pokud jednotka export servíruje, dělá to bez přihlášení.",
+        "description": "Zadej adresu jednotky. V iNELS IDM3 se předem nemusí nic povolovat — integrace používá stejné rozhraní jako samotné IDM3, na kterém odpovídá každá centrální jednotka.\n\nCestu k exportu nech prázdnou a seznam zařízení se stáhne z jednotky. Firmware, který export přes HTTP neservíruje, nemá co stahovat — ulož iNELS3 export v IDM3 a soubor přetáhni do pole pro nahrání.",
         "data": {
           "host": "Adresa",
-          "port": "ASCII port (z IDM3)",
-          "export_file": "Cesta k exportnímu souboru (prázdné = stáhnout)",
-          "export_upload": "Nahrání exportu (přetáhni sem soubor .is3)",
-          "delimiter": "Oddělovač (z IDM3)",
-          "number_base": "Číselná soustava (z IDM3)"
+          "port": "Port",
+          "password": "Heslo centrální jednotky",
+          "export_file": "Cesta k souboru exportu (prázdné = stáhnout)",
+          "export_upload": "Nahrání exportu (přetáhni sem soubor .is3)"
+        },
+        "data_description": {
+          "port": "Měň jen tehdy, když se k jednotce chodí přes tunel nebo přesměrovaný port.",
+          "password": "Heslo nastavené na centrální jednotce v IDM3. Nech prázdné, pokud žádné nastavené není — což je běžný případ."
         }
       },
       "reconfigure": {
         "title": "Centrální jednotka iNELS (CU3)",
-        "description": "Uprav, jak se Home Assistant připojuje k jednotce. Port, oddělovač a číselná soustava musí odpovídat nastavení protokolu třetích stran (ASCII) v iNELS IDM3. Když necháš cestu k exportu prázdnou, stáhne se z jednotky — nebo přetáhni čerstvý export do pole pro nahrání.",
+        "description": "Uprav, jak se Home Assistant k jednotce připojuje. Cestu k exportu nech prázdnou a seznam zařízení se stáhne z jednotky, nebo přetáhni nový soubor exportu do pole pro nahrání.",
         "data": {
           "host": "Adresa",
-          "port": "ASCII port (z IDM3)",
-          "export_file": "Cesta k exportnímu souboru (prázdné = stáhnout)",
-          "export_upload": "Nahrání exportu (přetáhni sem soubor .is3)",
-          "delimiter": "Oddělovač (z IDM3)",
-          "number_base": "Číselná soustava (z IDM3)"
+          "port": "Port",
+          "password": "Heslo centrální jednotky",
+          "export_file": "Cesta k souboru exportu (prázdné = stáhnout)",
+          "export_upload": "Nahrání exportu (přetáhni sem soubor .is3)"
+        },
+        "data_description": {
+          "port": "Měň jen tehdy, když se k jednotce chodí přes tunel nebo přesměrovaný port.",
+          "password": "Heslo nastavené na centrální jednotce v IDM3. Nech prázdné, pokud žádné nastavené není."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Centrální jednotka iNELS (CU3)",
+        "description": "Centrální jednotka už uložené heslo nepřijímá. Zadej to současné.",
+        "data": {
+          "password": "Heslo centrální jednotky"
+        },
+        "data_description": {
+          "password": "Heslo nastavené na centrální jednotce v IDM3. Nech prázdné, pokud žádné nastavené není."
         }
       }
     },
     "error": {
-      "cannot_connect": "ASCII port není dostupný. Zkontroluj, že je v IDM3 povolený protokol třetích stran a že port souhlasí.",
-      "invalid_auth": "Tato jednotka blokuje stažení exportu. Zadej místo toho cestu k lokálnímu souboru.",
+      "cannot_connect": "Na centrální jednotku se nepodařilo dosáhnout. Zkontroluj adresu a že Home Assistant vidí do sítě jednotky.",
+      "invalid_auth": "Centrální jednotka toto heslo odmítla.",
+      "password_required": "Tahle centrální jednotka má nastavené heslo. Zadej ho.",
+      "export_protected": "Tahle jednotka export nevydá. Nahraj soubor exportu, nebo zadej cestu k místní kopii.",
       "invalid_export": "Export se nepodařilo přečíst nebo neobsahuje žádné položky",
       "unknown": "Neočekávaná chyba"
     },
     "abort": {
-      "already_configured": "Tato centrální jednotka už je nastavená",
-      "reconfigure_successful": "Nastavení připojení bylo aktualizováno",
-      "wrong_unit": "Tato adresa je jiná centrální jednotka než tento záznam. Přidej ji jako novou integraci."
+      "already_configured": "Tahle centrální jednotka už je nastavená",
+      "reconfigure_successful": "Nastavení připojení bylo upraveno",
+      "reauth_successful": "Ověření proběhlo úspěšně",
+      "wrong_unit": "Na téhle adrese je jiná centrální jednotka, než ke které patří tento záznam. Přidej ji jako novou integraci."
     }
   },
   "issues": {
-    "reads_unsupported": {
-      "title": "IS3 Export nedokáže číst stav jednotky",
-      "description": "Centrální jednotka neodpověděla na čtení s oddělovačem {delimiter} a soustavou {number_base}, takže entity zobrazují odhadovaný stav místo živé hodnoty.\n\nOtevři nastavení protokolu třetích stran (ASCII) v iNELS IDM3, srovnej oddělovač a číselnou soustavu, pak integraci odeber a přidej znovu se správnými hodnotami."
+    "export_protected": {
+      "title": "IS3 Export nemůže stáhnout seznam zařízení",
+      "description": "Centrální jednotka nevydává soubor exportu, takže Home Assistant nemůže obnovit seznam zařízení.\n\nUlož iNELS3 export z IDM3 a nahraj ho: Nastavení → Zařízení a služby → IS3 Export → ⋮ → Přenastavit. Heslo jednotky s tímhle nesouvisí."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "unit_status": {
+        "name": "Stav jednotky",
+        "state": {
+          "stopped": "Zastavená",
+          "running": "Běží",
+          "running_fast": "Běží (rychlý režim)",
+          "unknown": "Neznámý"
+        }
+      }
     }
   }
 }

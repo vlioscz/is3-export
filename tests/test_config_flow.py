@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import voluptuous as vol
 
-from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.helpers.selector import FileSelector
+from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT
+from homeassistant.helpers.selector import FileSelector, TextSelector
 
 from custom_components.is3_export.config_flow import (
     build_schema,
@@ -19,13 +19,9 @@ from custom_components.is3_export.config_flow import (
     unit_identity,
 )
 from custom_components.is3_export.const import (
-    BASE_HEX,
-    CONF_DELIMITER,
     CONF_EXPORT_FILE,
     CONF_EXPORT_UPLOAD,
-    CONF_NUMBER_BASE,
     DEFAULT_PORT,
-    DELIMITER_SPACE,
 )
 from custom_components.is3_export.export import Is3Export, Is3Header
 
@@ -56,25 +52,33 @@ def _defaults(schema: vol.Schema) -> dict[str, object]:
 def test_a_fresh_form_uses_the_documented_defaults() -> None:
     defaults = _defaults(build_schema({}))
     assert defaults[CONF_PORT] == DEFAULT_PORT
-    assert defaults[CONF_DELIMITER] == DELIMITER_SPACE
-    assert defaults[CONF_NUMBER_BASE] == BASE_HEX
+    # Most units have no password set, so the field starts empty rather than
+    # demanding one.
+    assert defaults[CONF_PASSWORD] == ""
     # the host is not pre-filled on a fresh install
     assert CONF_HOST not in defaults
+
+
+def test_the_password_field_is_masked() -> None:
+    """It is a secret, so the form must not show it in the clear."""
+    schema = build_schema({})
+    marker = next(m for m in schema.schema if str(m) == CONF_PASSWORD)
+    assert isinstance(schema.schema[marker], TextSelector)
 
 
 def test_reconfigure_opens_on_the_current_values() -> None:
     existing = {
         CONF_HOST: "192.168.1.5",
-        CONF_PORT: 22272,
-        CONF_DELIMITER: ";",
-        CONF_NUMBER_BASE: "dec",
+        CONF_PORT: 9999,
+        CONF_PASSWORD: "hunter2",
         CONF_EXPORT_FILE: "",
     }
     defaults = _defaults(build_schema(existing))
     assert defaults[CONF_HOST] == "192.168.1.5"
-    assert defaults[CONF_PORT] == 22272
-    assert defaults[CONF_DELIMITER] == ";"
-    assert defaults[CONF_NUMBER_BASE] == "dec"
+    assert defaults[CONF_PORT] == 9999
+    # Pre-filled on purpose: correcting the host must not silently blank the
+    # password and strand the entry.
+    assert defaults[CONF_PASSWORD] == "hunter2"
 
 
 def test_the_form_offers_an_export_upload() -> None:
@@ -102,11 +106,10 @@ def test_schema_validates_a_complete_input() -> None:
     validated = build_schema({})(
         {
             CONF_HOST: "192.168.1.5",
-            CONF_PORT: 1111,
+            CONF_PORT: 9999,
+            CONF_PASSWORD: "",
             CONF_EXPORT_FILE: "",
-            CONF_DELIMITER: " ",
-            CONF_NUMBER_BASE: "hex",
         }
     )
     assert validated[CONF_HOST] == "192.168.1.5"
-    assert validated[CONF_PORT] == 1111
+    assert validated[CONF_PORT] == 9999

@@ -6,65 +6,105 @@
 
 [English](README.md) · **Česky**
 
-NEOFFICIÁLNÍ Home Assistant integrace pro **centrální jednotky iNELS** (ELKO EP) přes jejich
-ASCII rozhraní — především starší **CU3-01M** a **CU3-02M**. Komunikuje s
-jednotkou přímo, **nepotřebuje Connection Server**.
+NEOFFICIÁLNÍ Home Assistant integrace pro **centrální jednotky iNELS** (ELKO EP).
+Komunikuje s jednotkou přímo přes **UDP port 9999** — **ten samý port**, na
+který se připojuje konfigurační software jednotky — takže **nepotřebuje
+Connection Server**.
 
 > „IS3" v názvu je **iNELS3** — formát exportu `.is3`, ze kterého integrace
 > vychází.
 
-Seznam zařízení si stáhne z exportu, který jednotka sama servíruje. Stav
-sleduje živě: jednotka posílá změny sama, takže se nic nepolluje.
+**Na jednotce se nemusí nic povolovat.** Na každé vyzkoušené jednotce na tom
+portu odpovídala tak, jak byla, a změny posílala sama od sebe bez jakéhokoliv
+nastavování událostí — není co otevírat za port ani co zapínat v IDM3.
 
-> **Stav: experimentální.** Protokol je ověřený proti živým jednotkám, parser
-> proti exportům z několika instalací (17 až 1125 položek, IDM3 03-03-34 až
-> 03-05-03). Rolety hlásí **odhadovaný stav** — bez zpětné vazby o poloze; viz
-> [Omezení](#omezení).
+Seznam zařízení se bere z exportu `.is3`: z jednotek, které ho servírují **přes
+HTTP**, se stáhne rovnou, u ostatních ho uložíš z IDM3 a přetáhneš do formuláře —
+**novější jednotky export přes HTTP neservírují** (ověřeno na **CU3-07M** a
+**CU3-08M**), takže tam ho jednou nahraješ. Stav se pak sleduje živě z vlastních
+událostí jednotky a k tomu se ještě jednou za 30 s přečte všechno znovu.
 
-> **⚠️ Nová generace jednotek zatím nefunguje** (CU3-07M/08M/09M/10M — webové
-> rozhraní „Gateway Settings"). Současný firmware (stav 2026-08) server
-> protokolu třetích stran vůbec nespustí: nastavení se v pořádku uloží, ale
-> port se nikdy neotevře — a jednotka neservíruje ani HTTP export. Neztrácej
-> čas pokusy to rozběhat; opravu musí dodat ELKO ve firmwaru. Pole pro nahrání
-> exportu níže je na ten den připravené. Klasické jednotky (původní webové
-> rozhraní) fungují podle dokumentace.
+> **Stav: experimentální.** Než budeš předpokládat, že je tvoje jednotka
+> pokrytá, přečti si [Co je otestované](#co-je-otestované): část řady je ověřená
+> na živém hardwaru, u části se jen očekává, že se chová stejně. Rolety hlásí
+> **odhadovaný stav** — bez zpětné vazby o poloze; viz [Omezení](#omezení).
 
-## ❗ Nejdřív povol protokol v IDM3
+Jak byly protokoly zjištěny a co tenhle software je a co není:
+[NOTICE.md](NOTICE.md).
 
-Bez tohohle nefunguje nic — jednotka na ASCII portu neposlouchá.
+## Co je otestované
 
-V **iNELS IDM3** → *Konfigurace centrální jednotky* → **Third part setting**:
-
-| Položka | Co s ní |
+| Jednotka | Co bylo doopravdy vyzkoušené |
 | --- | --- |
-| **Port** | Výchozí **22272** na novějším IDM3 (starší jednotky měly **1111**); je konfigurovatelný, poznamenej si svůj. |
-| **Oddělovač** | Musí souhlasit s nastavením integrace. `[32]` je mezera. |
-| **Číselná soustava** | Musí souhlasit s nastavením integrace. |
-| **Režim** | Vzdálenné ovládání + IDM |
+| **CU3-01M** (nejstarší generace) | ověřené **čtení** |
+| klasická **CU3-0x** — referenční instalace, IDM3 **03-04-19** | **všechno**: čtení, zápisy, události, topení, stmívače, tlačítka |
+| **CU3-07M**, IDM3 **03-05-03** | ověřené **čtení i zápis** |
+| **CU3-08M** | jen to, co potřebovala 0.1.x: **neservíruje export přes HTTP** a nikdy neotevřela port, který 0.1.x používala. **Její port 9999 vyzkoušený není.** |
+| **CU3-09M**, **CU3-10M** | **nevyzkoušené vůbec.** Předpokládá se, že se chovají jako 07M/08M, protože jde o stejnou rodinu firmwaru — ale to je očekávání, ne výsledek. |
 
-Napravo zaškrtej **události, které má jednotka posílat**. Co nezaškrtneš, to se
-integrace nikdy nedozví a entita zůstane viset na poslední hodnotě:
+Parser exportu je jiná věc a stojí na širší základně: exporty z několika
+instalací, 17 až 1125 položek, zapsané IDM3 **03-03-34** až **03-05-03**.
 
-- `Digital_OUT_SwitchOn` / `SwitchOff` — relé (bez nich nepoznáš cvaknutí vypínačem)
-- `Analog_OUT_ValueChanged`, `Analog_OUT_SwitchOn` / `SwitchOff` — stmívače
-- `Analog_IN_ValueChange`, `Sensor_Change` — teploty, vlhkosti, analogové vstupy
-- `Digital_IN_SwitchOn` / `SwitchOff` — vstupy a tlačítka
-- `SysInt_Change`, `Program_ValueSwitchOn` / `Off` — systémové proměnné
+Pokud provozuješ jednotku, která v téhle tabulce není, nejužitečnější věc, co
+můžeš udělat, je říct, jak to dopadlo — tak či onak. Tabulka roste přesně z toho.
 
-Nakonec **Uložit do CU**.
+## Aktualizace firmwaru to může změnit
 
-Na těchhle zaškrtávátkách závisí, jak rychle se stav objeví v Home Assistantu.
-Jednotku ovládají i vypínače na zdech, takže změna nemusí přijít z HA — a pozná
-ji jen z události. **Co má vlastní událost, aktualizuje se řádově do sekundy;
-co ne, zůstane na poslední známé hodnotě, dokud se zase nezmění** — s jednou
-výjimkou: **teplota topné zóny** se dočítá na pomalé rotaci, takže zóna, které
-nejsou zaškrtnuté teplotní události, se dorovná místo toho, aby zamrzla na
-hodnotě ze startu. To kolísání u změn ze zdi (hned vs. 2–3 s) je zpoždění
-samotné jednotky, než změnu na ASCII odešle, ne integrace.
+Protokol, kterým tahle integrace mluví, byl zjištěn **pozorováním, ne ze
+specifikace**. Nic na něm není slíbené, že zůstane, jak je, a aktualizace
+firmwaru jednotky ho může beze slova změnit.
+
+- Je **ověřený proti jednotkám s IDM3 03-04-19 a 03-05-03**. Ostatní verze
+  vyzkoušené nejsou — což není totéž jako rozbité.
+- Když aktualizace formát na drátě opravdu změní, integrace může přestat
+  fungovat. Log to řekne: klient **jednou a nahlas varuje**, když jednotka
+  pošle datagramy, jejichž úvodní bajty nezná, a pojmenuje, co místo toho
+  dostal.
+- Přesně na tuhle otázku existuje nástroj, **nový v tomhle vydání**:
+
+```bash
+python tools/compat_check.py 192.168.1.10 --save before.json
+# ... aktualizace firmwaru jednotky ...
+python tools/compat_check.py 192.168.1.10 --compare before.json
+```
+
+`compat_check.py` otiskne každý předpoklad, na kterém integrace stojí —
+hlavičku paketu, kontrolní součet, tvar každé odpovědi, kódování hodnot, formát
+exportu i vlastní tabulku verzí protokolu v jednotce — a vypíše, který z nich se
+pohnul, každý s jednou srozumitelnou větou o tom, co tě ta změna stojí. **Jen
+čte** a netiskne nic, co by instalaci identifikovalo (žádné názvy zařízení,
+žádný název projektu), takže výstup jde bez obav vložit do issue.
+
+Pusť ho **před** aktualizací firmwaru a soubor si nech. Předtím má
+nesrovnatelně větší cenu než potom.
+
+## Jak stav zůstává aktuální
+
+Jednotka posílá každou změnu, kterou udělá — cvaknutí relé vypínačem na zdi,
+novou naměřenou teplotu, stisk tlačítka — aniž by se kdekoliv muselo cokoliv
+zaškrtávat.
 
 Vlastní příkazy z HA se zobrazí okamžitě a integrace je pak **ověří zpětným
-čtením** — když se výstup neuchytil nebo ho mezitím přehodil vypínač na zdi,
-oprav se stav na skutečnost místo aby ikona zůstala viset ve špatném stavu.
+čtením**: když se výstup neuchytil nebo ho mezitím přehodil vypínač na zdi,
+srovná se stav na skutečnost místo aby ikona zůstala viset ve špatném stavu.
+Naměřeno na autorově jednotce: zápis jednotka potvrdí za **4 ms** a její vlastní
+událost o tom zápisu dorazí o **0,13 s** později.
+
+**Seznam zařízení** sleduje jednotku taky. Každý cyklus si integrace vyžádá
+otisk projektu nahraného v jednotce — jeden paket — a export stáhne znovu jen
+tehdy, když se ten otisk změní, což je přesně okamžik, kdy technik republikuje
+z IDM3. Republikovaný projekt se tak projeví do jednoho cyklu místo do půl
+hodiny a po zbytek času se nestahuje vůbec nic.
+
+Kromě událostí integrace navíc **přečte každou čitelnou adresu v každém
+30sekundovém cyklu**. Může si to dovolit: přečtení celé instalace — **313
+čitelných adres** — trvá **0,13 s**. Adresa, které přestanou chodit události,
+tak nezůstane viset; do jednoho cyklu je zase v obraze, aniž by cokoliv muselo
+předem vědět, které adresy jsou ohrožené.
+
+**Tlačítka se do toho znovupřečtení neberou.** Tlačítko nemá stav, který by
+stálo za to obnovovat — je to okamžik, ne hodnota — a znovupřečtení by jen
+riskovalo přehrání stisku, který nikdo neudělal.
 
 ## Instalace
 
@@ -83,24 +123,45 @@ Ručně: zkopíruj `custom_components/is3_export` do `config/custom_components/`
 
 | Pole | Popis | Výchozí |
 | --- | --- | --- |
-| Host | IP adresa jednotky | — |
-| ASCII port | **z IDM3** | `22272` |
-| Export file path | nech prázdné, stáhne se z jednotky | prázdné |
+| Adresa | IP adresa jednotky | — |
+| Port | UDP. Měň ho jen tehdy, když se k jednotce chodí přes tunel nebo přesměrovaný port. | `9999` |
+| Heslo centrální jednotky | heslo nastavené na jednotce v IDM3; **nech prázdné, pokud žádné nastavené není**, což je běžný případ | prázdné |
+| Cesta k souboru exportu | nech prázdné, stáhne se z jednotky | prázdné |
 | Nahrání exportu | pro jednotky, které export přes HTTP neservírují — přetáhni sem `.is3` uložený z IDM3; kopie se drží v `config/is3_export/` | — |
-| Oddělovač | **z IDM3**, nabízí všech 27 možností | mezera `[32]` |
-| Číselná soustava | **z IDM3** — hodnoty se čtou v této soustavě (starší jednotky posílají hex bez prefixu `0x`, takže musí sedět) | hexadecimální |
 
 Název integrace se vezme z hlavičky exportu.
 
-**Heslo se nezadává.** Export servíruje webserver jednotky jako statický soubor
-bez přihlášení, takže **heslo projektu iNELS na jeho dostupnost nemá vliv**.
-(Kdyby přesto nějaká jednotka stažení blokovala, zadej cestu k lokálně
-staženému exportu.)
+**Heslo je pro jednotku, ne pro export.** Export servíruje webserver jednotky
+jako statický soubor bez přihlášení, takže **heslo projektu iNELS na jeho
+dostupnost nemá vliv**. (Kdyby přesto nějaká jednotka stažení blokovala, nahraj
+export nebo zadej cestu k lokálně staženému.)
 
-Když entity hlásí *odhadovaný stav*, sedí ti špatně **oddělovač** nebo
-**číselná soustava** — Home Assistant na to upozorní opravou (repair). Nemusíš
-integraci mazat, stačí ji přenastavit: **Nastavení → Zařízení a služby →
-IS3 Export → ⋮ → Překonfigurovat**.
+Cokoliv z toho se dá opravit i později, bez mazání integrace: **Nastavení →
+Zařízení a služby → IS3 Export → ⋮ → Překonfigurovat**.
+
+## Přechod z 0.1.x
+
+0.2.0 vyměňuje přenos: všechno teď jde přes **UDP port 9999**. **Existující
+instalace se povýší za chodu** — ID entit, oblasti i historie zůstávají a nic se
+nemusí nastavovat znovu.
+
+- **Port** se přepíše na `9999`, ať tam bylo uložené cokoliv.
+- Dvě nastavení připojení, která původní přenos potřeboval, **mizí** a s nimi
+  i ta oprava (repair), která na ně upozorňovala.
+- Pokud má centrální jednotka v IDM3 nastavené **heslo**, Home Assistant vyvolá
+  své obvyklé opětovné ověření a zeptá se na něj. Když žádné nastavené není,
+  neptá se na nic.
+- **Stojí za to udělat ručně: vypnout v IDM3 *Third part setting*.** To
+  nastavení sedí v jednotce, ne v Home Assistantu, takže ho odsud nikdo vypnout
+  nemůže — a dokud je zapnuté, drží jednotka otevřené dveře, které nechtějí
+  žádné heslo a které tahle integrace už nepoužívá.
+
+Přečtení celé instalace — **313 čitelných adres** — trvá **0,13 s** a adresy
+počítadel (`0x0206` — vodoměry a elektroměry) hlásí skutečné stavy jednotky.
+
+**Návrat zpátky na 0.1.x** znamená integraci smazat a přidat znovu (ID entit,
+oblasti i historie jdou s ní), takže si napřed udělej zálohu, jestli chceš mít
+tuhle cestu otevřenou.
 
 ## Odebrání integrace
 
@@ -202,6 +263,12 @@ relé po té době rozepne, tak ji **nastav na reálnou dobu chodu** rolety
 (o chlup víc), ať dojede na doraz dřív. Reverz nejdřív uvolní opačný směr,
 chvíli počká a pak zabere — modul směry hardwarově blokuje.
 
+Jméno je slabý důkaz, takže jedno spárování se záměrně odmítá: **dva výstupy,
+z nichž každý patří jiné topné zóně, zůstanou dvěma spínači**, nespojí se do
+žaluzie. Zóna nahoře a zóna dole nesou `up` a `down` v názvu každá z vlastního
+důvodu a špatně poskládaná roleta by ovládala skutečná relé — jedné místnosti by
+topení zapnula a druhé vypnula.
+
 Poloha se nehlásí, takže cover nese **odhadovaný stav**. Adresy, které si vezme
 žaluzie, už nevzniknou jako spínače.
 
@@ -278,10 +345,9 @@ long-press v iNELS) doběhne a tlačítko je **pořád držené**, je to `long_p
 vystřelí **hned v tom okamžiku, nečeká na puštění**, takže akce na dlouhý stisk
 naskočí včas. Ztracené rozepnutí tlačítko nezasekne — pojistný časovač uvolní.
 
-> ⚠️ **Podmínka spolehlivého short/long: neběžící Connection Server.** Jeho
-> periodický sběr jednotku na pár sekund zmrazí a dobu držení rozmaže (viz sekci
-> **Connection Server zpomaluje odezvu** níže). Původně to kvůli tomu vypadalo
-> jako slepá ulička; v čistých podmínkách je timing spolehlivý.
+Short/long stojí na tom, že události dorazí, když se stanou, takže cokoliv, co
+je zdrží, dobu držení rozmaže — viz
+[Další programy komunikující s jednotkou](#další-programy-komunikující-s-jednotkou).
 
 **RF ovladače zůstávají jen na `press`** — jejich rozepnutí se ztrácí příliš
 často, doba držení tam spolehlivá není. `press` se u nich vystřelí na **každou
@@ -318,26 +384,41 @@ sleduje málokdo. Alert má `device_class problem` a je diagnostický.
 ### RF zařízení
 
 Zařízení na RF modulu (např. `RFKEY` — dálkové ovladače) se objeví jako vlastní
-zařízení s tlačítky (`binary_sensor`) a stav baterie `Battery_LOW` dostane
-`device_class battery`.
+zařízení. Jeho tlačítka jsou entity `event` se stiskem `press` (RF nehlásí
+držení, takže žádný `long_press`).
+
+> **Držené RF tlačítko vystřelí `press` víckrát.** Modul během držení posílá
+> „sepnuto" zhruba každých 1,5 s a každé z toho je odsud k nerozeznání od
+> stisku — dvousekundové podržení na živém `RFKEY` udělalo dva. Drátové
+> tlačítko tohle nedělá. Pokud automatizace na RF tlačítku nesmí proběhnout
+> dvakrát, dej jí pojistku (`mode: single` s `max_exceeded: silent`, nebo
+> podmínku na čas posledního spuštění).
+
+Stav baterie `Battery_LOW` je `binary_sensor` s `device_class battery`. Výjimkou je vstup **`IBWL`**: zrcadlí to, co je s ním
+spárované — tlačítko i dveřní kontakt, což z exportu nepoznáme — takže zůstává
+`binary_sensor`, dokud ho nepojmenuješ `TL_`.
 
 ### Co je v exportu
 
 Export **není** seznam všeho — v IDM3 se vybírá, co se do něj zahrne. Chybí-li
-ti něco v Home Assistantu, přidej to tam. Integrace kontroluje jednou za
-30 minut, jestli se seznam změnil, a sama se přenačte. Hned to udělá **Reload**.
+ti něco v Home Assistantu, přidej to tam a republikuj: integrace si příští cyklus
+všimne, že se projekt změnil, a sama se přenačte (viz
+[Jak stav zůstává aktuální](#jak-stav-zůstává-aktuální)). Hned to udělá
+**Reload**.
 
 ### Hodnoty
 
 Teploty a vlhkosti chodí **vynásobené stem** — 2550 znamená 25,50 °C. Stmívače
 jsou rovnou v procentech. `SYSTEMINTEGER` je **syrová hodnota**, která se nijak
-nepřepočítává; co znamená, určuje program, který ji používá.
+nepřepočítává; co znamená, určuje program, který ji používá. **Počítadla**
+(`0x0206`) hlásí skutečné stavy jednotky.
 
 ## ⚠️ Bezpečnost
 
-**ASCII port nemá žádnou autentizaci** — a heslo na jednotce to nezmění, to
-chrání jen webserver. Kdokoliv, kdo se dostane na ten TCP port, může ovládat
-celou instalaci.
+**Autorizace jednotky není skutečná překážka.** Ve výchozím stavu přijme
+**prázdné heslo**, a tak je většina jednotek nechaná — takže kdokoliv, kdo na
+jednotku v síti dosáhne, může ovládat celou instalaci. Heslo nastavené na
+jednotce v IDM3 laťku zvedne; šifrované na tom není nic tak jako tak.
 
 Drž jednotku v oddělené VLAN nebo ji aspoň odděl firewallem od nedůvěryhodných
 zařízení a od internetu.
@@ -347,46 +428,55 @@ zařízení a od internetu.
 - **Rolety nehlásí polohu.** Cover ukazuje odhadovaný stav
   (otevřeno / zavřeno / v pohybu), ne procenta; doraz relé rolety se odvozuje
   z nastavené doby chodu, neměří se.
-- **Scény se nedají spouštět** — `GET` na ně vrací `N`, zápis neověřený.
+- **Scény se nedají spouštět** — čtení na nich nevrátí žádnou hodnotu, zápis neověřený.
 - **Binární formáty `.otc` / `.cld` se nečtou.** Obsahují navíc pojmenované scény.
-- **HTTP i ASCII port jdou bez šifrování.**
+- **Šifrované není nic** — ani HTTP export, ani provoz na portu 9999.
 
-## ⚠️ Connection Server zpomaluje odezvu
+## Další programy komunikující s jednotkou
 
-Pokud tutéž centrální jednotku obsluhuje i **iNELS Connection Server**, počítej
-s občasnou prodlevou. Connection Server si zhruba **každých 40–60 s** sáhne na
-jednotku pro kompletní stav a jednotka při tom na **~2–4 s zamrzne celý ASCII
-výstup** — přestane posílat události i vykonávat příkazy. Do tohoto okna tu a tam
-spadne stisk nebo přepnutí, které pak reaguje o ty 2–4 s později — a to **pro
-všechny klienty naráz**, tedy i pro samotný Connection Server (zpožďuje tak i
-sám sebe).
+**Naměřené:** **konfigurační software jednotky připojený ve stejnou chvíli stojí
+skoro nic.** S ním připojeným trvalo jedno čtení mediánově **4 ms** a celá
+instalace **179 ms** (proti 130 ms bez něj), zápisy se potvrzovaly za **8 ms**
+a proud událostí běžel celou dobu. Home Assistant tedy může klidně běžet,
+zatímco pracuješ na projektu.
 
-- **Nepotřebuješ-li Connection Server, vypni ho** — odezva integrace je pak
-  plynulá (jednotka odpovídá ~180 ms).
-- **Potřebuješ-li ho**, zpomal/odlehči v jeho konfiguraci ten periodický sběr
-  stavů (jak často a kolik toho z jednotky čte).
-
-Ověřeno izolačně: integrace sama žádné zamrzání nezpůsobuje — vzniká jen tehdy,
-když je připojený i Connection Server.
-
-> Nesouvisí s tím ani počet klientů: centrální jednotka má **omezený počet ASCII
-> spojení**. Nenechávej na ASCII port mířit spoustu klientů naráz — když se
-> sloty vyčerpají, jednotka spojení sice přijme, ale přestane obsluhovat (HTTP
-> export jede dál) a pomůže až restart CU.
+**Neměřené:** jak se to chová vedle běžícího **iNELS Connection Serveru**.
+Očekává se, že v pohodě — Connection Server chodí na jednotku po tomhle samém
+portu pro svůj vlastní provoz a konfigurační klient na tomhle portu prokazatelně
+žádné potíže nedělá — ale nikdo to nezměřil. Pokud ho provozuješ, založ prosím
+issue s tím, co pozoruješ; přesně tohle měření zatím nikdo nemá.
 
 ## Diagnostika
+
+Centrální jednotka dostane senzor **Stav jednotky** (diagnostický): jestli se
+hlásí jako *běží*, *běží v rychlém režimu*, nebo je **zastavená**. Zastavená
+jednotka pořád odpovídá po síti a pořád drží poslední hodnoty, takže bez tohohle
+v Home Assistantu všechno vypadá normálně, zatímco v domě nereaguje nic.
+
+Atribut `unit_clock` jsou **vlastní** datum a čas jednotky. Jednotka si podle
+nich řídí topné rozvrhy, takže když se rozcházejí se skutečným časem — typicky
+přesně o hodinu, když jednotka zůstala na zimním čase — topení spíná v jinou
+hodinu, než čekáš, a nic jiného v Home Assistantu ti neřekne proč.
 
 **Stáhni diagnostiku** z integrace (menu **⋮**) — redigovaný snímek: konfigurace,
 schopnosti jednotky a každá položka s živou hodnotou a tím, jak se klasifikovala.
 Nejrychlejší věc k přiložení k bug reportu; host a případné přihlašovací údaje
 jsou začerněné.
 
-Na hlubší oťukání je read-only skript, který zjistí, co ASCII port jednotky umí
-(přidáš-li `--write`, pošle i SET):
+Když se integrace vůbec nenastaví, není z čeho diagnostiku stahovat. Na stejné
+otázky odpoví zvenčí `tools/probe_is3.py` — jestli jednotka odpovídá, jestli
+chce heslo, jestli se otevře datová rovina a jestli posílá události:
 
 ```bash
-python tools/probe_is3.py <ip> <port> 0x0102000A
+python tools/probe_is3.py 192.168.1.10
 ```
+
+Vypisuje jen adresy a hodnoty, nikdy názvy zařízení, takže výstup jde bez obav
+vložit do issue. Bez přepínače `--write` jen čte.
+
+A než sáhneš jednotce na firmware, `tools/compat_check.py` zaznamená, na čem
+integrace stojí, abys potom poznal, co se pohnulo — viz
+[Aktualizace firmwaru to může změnit](#aktualizace-firmwaru-to-může-změnit).
 
 ## Vývoj
 
@@ -398,9 +488,13 @@ pytest
 Na Windows si nejdřív přečti [CONTRIBUTING.md](CONTRIBUTING.md) — ušetří
 odpoledne (Python 3.13, krátká cesta k venv a trik s wheelem `lru-dict`).
 
-Jednotka mluví i jinými protokoly, se kterými integrace nepracuje: **ELKONET**
-(binární, port 9999) a **XML-RPC** na Connection Serveru (port 7801) — pro tu
-cestu existuje [InelsForHass](https://github.com/JH-Soft-Technology/InelsForHass).
+Integrace komunikuje s jednotkou na **UDP portu 9999**, tedy tom, který
+používá její konfigurační software. Druhá cesta do jednotky je **XML-RPC** na iNELS Connection Serveru
+(port 7801), kterou tahle integrace nepoužívá; pro tu cestu existuje
+[InelsForHass](https://github.com/JH-Soft-Technology/InelsForHass).
+
+Jak byly protokoly zjištěny a jaká omezení z toho plynou:
+[NOTICE.md](NOTICE.md).
 
 ## Licence
 

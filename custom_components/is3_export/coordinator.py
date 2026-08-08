@@ -1,12 +1,15 @@
 """Coordinator for the IS3 Export integration.
 
 The export file is the address book: it says which addresses exist and what they
-are called.  State comes from the unit itself, which pushes an ``EVENT`` line
-whenever a value changes.
+are called.  State comes from the unit itself, which pushes an event whenever a
+value changes.
 
-So the flow is: read every address once at startup to get a baseline, then let
-the event stream keep it current.  The periodic refresh exists only to re-read
-the export file and to re-seed anything that never reported.
+So the flow is: read every address to get a baseline, then let the event stream
+keep it current.  The unit answers a whole installation in a fraction of a
+second -- 313 addresses in 0.13s on the reference unit, eight datagrams -- so
+that baseline is simply taken again on every cycle.  It costs almost nothing and
+it means any address whose events stop arriving corrects itself within one
+interval, instead of needing the machinery a slow transport used to require.
 """
 
 from __future__ import annotations
@@ -23,16 +26,18 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import Is3Client, Is3Error
 from .const import DEFAULT_SCAN_INTERVAL, DOMAIN, EXPORT_RELOAD_INTERVAL
+from .client import Is3Client
+from .protocol import UnitState
+from .errors import Is3AuthError, Is3Error
 from .export import (
     PLATFORM_SENSOR,
     Is3Export,
-    find_controllers,
     is_press_button,
     is_readable,
     platform_of,
 )
+from .issues import async_update_export_issue
 from .source import (
     Is3ExportAuthError,
     Is3ExportError,
@@ -43,10 +48,6 @@ from .source import (
 _LOGGER = logging.getLogger(__name__)
 
 type Is3ConfigEntry = ConfigEntry[Is3Coordinator]
-
-# Reading the whole address book one address at a time takes a while, so it is
-# only done at startup and when an address has still never reported.
-INITIAL_READ_LIMIT = 250
 
 # How long a value just written stays authoritative over a contradicting event.
 # Long enough to cover the unit's echo of a rapid toggle, short enough that a
@@ -66,20 +67,10 @@ WRITE_VERIFY_DELAY = 1.5
 # the notification is coalesced.  Buttons and outputs are never throttled.
 NOTIFY_THROTTLE = 1.0
 
-# An address can answer with no value -- a schedule, plan or scene replies "N",
-# a failed sensor "???" -- or not answer at all.  Retrying such an address on
-# every scan keeps a GET burst on the one shared connection, and the unit
-# answers those ahead of pushing its events, so a button press lands late.  So a
-# no-value address is retried only this many times, then left to the event
-# stream; one that does answer drops out of the retry set at once.
-MAX_SEED_ATTEMPTS = 3
-
-# Climate temperatures are computed controller outputs that some units never
-# send as change events (seen on older IDM3); a value read once at startup would
-# then freeze.  A small rotating batch of them is re-read each scan to self-heal
-# -- kept tiny so it never becomes the GET burst that once delayed button
-# presses.  Units with no heating zones refresh nothing.
-STALE_REFRESH_BATCH = 6
+# An address can answer with no value -- a schedule, plan or scene has none, and
+# a failed sensor reports an error marker.  Both read back as None, which is not
+# a problem to work around: the address is simply read again next cycle along
+# with everything else.
 
 
 @dataclass(slots=True)
@@ -124,6 +115,12 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         self.password = password
         self._export: Is3Export | None = None
         self._export_read_at: float = 0.0
+        # Digest of the project the unit is running; a change means the
+        # installer republished and the device list is worth fetching again.
+        self._project_digest: bytes | None = None
+        # What the unit says about itself, refreshed each cycle for diagnostics.
+        self.unit_state: UnitState | None = None
+        self._unit_state_listeners: list[CALLBACK_TYPE] = []
         self.reads_supported = False
         self._values: dict[int, int] = {}
         self._seeded = False
@@ -142,12 +139,6 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         self._flush_scheduled: set[int] = set()
         # Button addresses: momentary, so delivered on every event, not deduped.
         self._momentary: frozenset[int] = frozenset()
-        # address -> times it was read and answered no value; capped so a
-        # permanently-"N" address stops being re-read every scan (see below).
-        self._seed_attempts: dict[int, int] = {}
-        # Temperature channels re-read on rotation so a stuck value self-heals.
-        self._refresh_addresses: list[int] = []
-        self._refresh_cursor = 0
         # Per-relay-blind travel time in seconds, keyed by the cover's open
         # address.  Owned by the travel-time Number entities, read by the covers
         # to time an auto-stop and to scale their position estimate.
@@ -195,6 +186,24 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
             listeners.remove(update)
             if not listeners:
                 del self._address_listeners[address]
+
+        return remove
+
+    @callback
+    def async_add_unit_state_listener(self, update: CALLBACK_TYPE) -> CALLBACK_TYPE:
+        """Subscribe to changes in what the unit says about itself.
+
+        Kept apart from the address listeners for the same reason they exist:
+        the base coordinator's blanket wake is suppressed here, so anything not
+        tied to an address needs somewhere of its own to be told.
+        """
+        self._unit_state_listeners.append(update)
+
+        @callback
+        def remove() -> None:
+            """Unsubscribe."""
+            if update in self._unit_state_listeners:
+                self._unit_state_listeners.remove(update)
 
         return remove
 
@@ -332,24 +341,25 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         self._async_notify(address)
 
     async def async_detect_capabilities(self) -> None:
-        """Find out once whether this unit answers read commands."""
+        """Check that the unit will actually answer reads.
+
+        Authorization is not proof: a unit hands back a token and then ignores
+        the data plane when the password is not the one it wanted, so a read is
+        the only thing that settles it.  An address with no value still counts
+        as an answer -- what matters is that the unit replied at all.
+        """
         export = await self._async_read_export()
         probe = next((e for e in export.entries if is_readable(e)), None)
         if probe is None:
             return
 
         try:
-            self.reads_supported = await self.client.async_get(probe.address_hex) is not None
-        except Is3Error:
-            self.reads_supported = False
-
-        if not self.reads_supported:
-            _LOGGER.warning(
-                "Unit did not answer a read of %s using %r as delimiter. Entities "
-                "will show an assumed state; try the other delimiter",
-                probe.address_hex,
-                self.client.delimiter,
-            )
+            await self.client.async_get(probe.address_hex)
+        except Is3AuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except Is3Error as err:
+            raise UpdateFailed(f"Unit did not answer a read: {err}") from err
+        self.reads_supported = True
 
     async def _async_update_data(self) -> Is3Data:
         """Re-read the export file and seed any address that has no value yet."""
@@ -367,123 +377,120 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         self._momentary = frozenset(
             entry.address for entry in export.entries if is_press_button(entry)
         )
-        # Temperature channels re-read on rotation (see STALE_REFRESH_BATCH):
-        # computed controller outputs that some units never push as events.
-        self._refresh_addresses = [
-            address
-            for controller in find_controllers(export)
-            for address in controller.temperature_addresses
-        ]
-
-        if not self.reads_supported:
-            if not self._seeded:
-                # Fall back to the snapshot the export file was written with.
-                self._values = {
-                    e.address: e.value for e in export.entries if e.value is not None
-                }
-                self._seeded = True
-            return Is3Data(export=export, values=dict(self._values))
-
-        # Read everything readable once, at startup, to establish a baseline.
-        # After that the event stream keeps values current, so only addresses
-        # that have *still* never reported are re-read.  Re-reading every output
-        # on every cycle -- which this used to do -- put a burst of GETs on the
-        # one shared connection every scan, and the unit answered them ahead of
-        # pushing its own events, so a button press could land seconds late,
-        # queued behind the replies.  Listening beats polling: the unit pushes
-        # an event for an output when it changes, the same as for a wall switch.
-        unread = [
-            e.address_hex
-            for e in export.entries
-            if is_readable(e)
-            and e.address not in self._values
-            and self._seed_attempts.get(e.address, 0) < MAX_SEED_ATTEMPTS
-        ]
-        if unread:
-            await self._async_seed(unread[:INITIAL_READ_LIMIT])
-            self._seeded = True
-
-        # Re-read a rotating slice of the temperature channels so a zone whose
-        # change events are not configured still catches up over a few cycles.
-        await self._async_refresh_stale(self._next_refresh_batch())
+        # Buttons are deliberately left out.  A button has no state worth
+        # re-reading -- everything it means is in the transition, and that
+        # arrives as an event.  Reading one can only do harm: its value is
+        # delivered as though the contact had just moved, and an RF input whose
+        # release went missing reads as still-down, which would fire a press on
+        # every cycle, forever.
+        await self._async_seed(
+            [
+                e.address_hex
+                for e in export.entries
+                if is_readable(e) and e.address not in self._momentary
+            ]
+        )
+        self._seeded = True
+        await self._async_read_unit_state()
 
         return Is3Data(export=export, values=dict(self._values))
 
-    async def _async_seed(self, addresses: list[str]) -> None:
-        """Read a batch of addresses to establish a baseline.
+    async def _async_read_unit_state(self) -> None:
+        """Ask the unit how it is running, for the diagnostic sensor.
 
-        Reading the whole list takes seconds, so a value can change -- from a
-        command, or from a wall switch pushing an event -- while a read is in
-        flight.  The reply was captured before that change, so applying it would
-        overwrite the newer value with a stale one and leave the entity wrong
-        until the next cycle.  Any address updated after its read was issued is
-        therefore left as it is.
+        Best effort: this is one unauthenticated packet, and a unit that will
+        not answer it is not a reason to fail a refresh that has otherwise
+        worked.
         """
-        _LOGGER.debug("Reading %d addresses to seed state", len(addresses))
-        for address in addresses:
-            key = int(address, 16)
-            asked_at = self.hass.loop.time()
-            try:
-                value = await self.client.async_get(address)
-            except Is3Error as err:
-                raise UpdateFailed(f"Cannot read {address}: {err}") from err
-            if value is None:
-                # No value now; count the miss so we eventually stop asking.
-                self._seed_attempts[key] = self._seed_attempts.get(key, 0) + 1
-                continue
+        try:
+            state = await self.client.async_unit_state()
+        except Is3Error as err:
+            _LOGGER.debug("Could not read the unit's state: %s", err)
+            return
 
+        if state is None or state == self.unit_state:
+            return
+        self.unit_state = state
+        for update in self._unit_state_listeners:
+            update()
+
+    async def _async_seed(self, addresses: list[str]) -> None:
+        """Read every readable address and store what came back.
+
+        The unit answers dozens of addresses per datagram, so the whole list is
+        a handful of round trips and is simply re-read each cycle.  That is what
+        makes an address whose events stop arriving -- a computed controller
+        output, say, which some units never push -- correct itself, without
+        anything having to know which addresses are at risk.
+
+        A value can still change while the batch is in flight: a wall switch
+        pushes an event, or a command lands.  The reply was captured before
+        that, so applying it would put the older value back; any address updated
+        after the read was issued is therefore left alone.
+        """
+        if not addresses:
+            return
+
+        asked_at = self.hass.loop.time()
+        try:
+            values = await self.client.async_get_many(addresses)
+        except Is3AuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except Is3Error as err:
+            raise UpdateFailed(f"Cannot read the unit: {err}") from err
+
+        for address, value in values.items():
+            if value is None:
+                continue  # no value for this address right now
+            key = int(address, 16)
             if self._updated_at.get(key, 0.0) > asked_at:
                 _LOGGER.debug("Ignoring read of %s, changed while in flight", address)
                 continue
-
             self._async_store(key, value)
 
-    def _next_refresh_batch(self) -> list[int]:
-        """The next rotating slice of the temperature channels to re-read."""
-        addresses = self._refresh_addresses
-        if not addresses:
-            return []
-        start = self._refresh_cursor % len(addresses)
-        batch = addresses[start : start + STALE_REFRESH_BATCH]
-        if (shortfall := STALE_REFRESH_BATCH - len(batch)) > 0:
-            batch += addresses[:shortfall]  # wrap around to the start
-        self._refresh_cursor = (start + STALE_REFRESH_BATCH) % len(addresses)
-        return batch
+    async def _async_project_changed(self) -> bool | None:
+        """Whether the unit is running a different project than last time.
 
-    async def _async_refresh_stale(self, addresses: list[int]) -> None:
-        """Re-read addresses that may have frozen, storing any change.
+        The unit will hand over a digest of the project loaded in it, which
+        changes exactly when the installer republishes from IDM3 -- the one
+        thing that changes the device list.  Asking costs a single packet, so
+        a republish is noticed within a cycle instead of within the reload
+        interval, and the export does not have to be downloaded to find out.
 
-        NB: must NOT be named ``_async_refresh`` -- that is the base
-        DataUpdateCoordinator's own method, which HA calls with
-        ``log_failures=...``; shadowing it breaks setup (it did, in 0.1.6).
-
-
-        Unlike seeding, these already have a value; they are read again because a
-        channel that stopped sending change events would otherwise stay at its
-        last reading.  A value that changed while the read was in flight is kept
-        as the newer one, the same as when seeding; a read error is skipped
-        rather than failing the whole cycle, since this is best-effort.
+        None means the unit did not say, and the caller should fall back to
+        re-reading on a timer.
         """
-        for address in addresses:
-            asked_at = self.hass.loop.time()
-            try:
-                value = await self.client.async_get(f"0x{address:08X}")
-            except Is3Error:
-                continue
-            if value is None:
-                continue
-            if self._updated_at.get(address, 0.0) > asked_at:
-                continue
-            self._async_store(address, value)
+        try:
+            digest = await self.client.async_project_digest()
+        except Is3Error:
+            return None
+        if digest is None:
+            return None
+
+        changed = self._project_digest is not None and digest != self._project_digest
+        self._project_digest = digest
+        return changed
 
     async def _async_read_export(self) -> Is3Export:
-        """Get the export, re-reading it only once it has gone stale.
+        """Get the export, re-reading it when the unit's project changes.
 
-        The device list changes only when the installer republishes it from
-        IDM3, so it would be wasteful to download it on every value refresh.
+        Falls back to a timer where the unit will not say -- and keeps the
+        timer regardless for an export read off disk, since a file can be
+        replaced by hand without the unit's project changing at all.
         """
         now = self.hass.loop.time()
-        if (
+        changed = await self._async_project_changed()
+
+        if changed:
+            _LOGGER.debug("Unit reports a different project; re-reading the export")
+        elif (
+            self._export is not None
+            and changed is False
+            and self.export_file is None
+        ):
+            # The unit is running what it was; nothing to download.
+            return self._export
+        elif (
             self._export is not None
             and now - self._export_read_at < EXPORT_RELOAD_INTERVAL.total_seconds()
         ):
@@ -514,17 +521,32 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         """Read the export, from disk or from the unit."""
         try:
             if self.export_file is not None:
-                return await self.hass.async_add_executor_job(
+                export = await self.hass.async_add_executor_job(
                     read_export_file, self.export_file
                 )
-            return await async_fetch_export(
-                async_get_clientsession(self.hass),
-                self.host,
-                self.http_port,
-                self.username,
-                self.password,
-            )
+            else:
+                export = await async_fetch_export(
+                    async_get_clientsession(self.hass),
+                    self.host,
+                    self.http_port,
+                    self.username,
+                    self.password,
+                )
         except Is3ExportAuthError as err:
-            raise ConfigEntryAuthFailed(str(err)) from err
+            # Deliberately not ConfigEntryAuthFailed: that opens the
+            # re-authentication dialog, which collects the unit's own password
+            # -- a different credential from the one this web server is asking
+            # for.  The user would type the right password, it would validate,
+            # and the download would fail again, forever.  The way out is to
+            # upload the export, so say that instead.
+            async_update_export_issue(
+                self.hass, self.config_entry.entry_id, blocked=True
+            )
+            raise UpdateFailed(f"{err}. Upload the export file instead.") from err
         except Is3ExportError as err:
             raise UpdateFailed(str(err)) from err
+
+        async_update_export_issue(
+            self.hass, self.config_entry.entry_id, blocked=False
+        )
+        return export

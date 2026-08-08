@@ -48,6 +48,30 @@ base-class attribute is a bug the suite can only catch by asserting identity
 against the base class (see `tests/test_stale_refresh.py`), so never name a
 coordinator method after anything `DataUpdateCoordinator` already has.
 
+## Testing against a real unit
+
+`tools/ha_smoke.py` boots a genuine Home Assistant into a temporary config
+directory and sets the integration up against a unit you name — covering
+config-entry setup, the migration, entity creation, the service layer and
+unload, none of which the suite above can reach:
+
+```bash
+python tools/ha_smoke.py 192.168.1.10 --read-only
+```
+
+Without `--read-only` it also drives a dimmer and a heating zone, reading each
+value first and putting it back afterwards; a zone is only ever asked for a
+temperature below the room it is in, so nothing calls for heat. Use it before
+releasing anything that touches setup.
+
+`tools/compat_check.py <host>` is the other half: it fingerprints every
+assumption the protocol code makes and can diff two fingerprints, which is how
+a firmware change gets caught deliberately rather than by a bug report. Take one
+from any unit you have access to, and keep it.
+
+`tools/probe_is3.py <host>` answers the "does this unit talk to us at all"
+question from outside Home Assistant.
+
 ## Before committing
 
 **Never commit real installation data** — no real device names, hardware

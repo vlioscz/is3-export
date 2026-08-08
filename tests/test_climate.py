@@ -126,6 +126,123 @@ def test_setpoint_write_settles_then_verifies() -> None:
     assert SETPOINT_ATTEMPTS >= 2, "a single write is not always accepted"
 
 
+# --- Confirming a setpoint the zone will not report back --------------------
+#
+# A zone that is switched off reports no setpoint at all -- Required-Therm-AOUT
+# comes back as "no value", on this transport and on the old one alike.  There
+# is then nothing to verify a write against, which is not the same as the write
+# having failed.  Reporting it as a failure told people their heating command
+# had not landed every single time they touched a zone that was off.
+
+
+class _SetpointClient:
+    """Accepts writes, and reports whatever setpoint it is told to."""
+
+    def __init__(self, reports) -> None:
+        self._reports = reports
+        self.writes: list[tuple[str, int]] = []
+
+    async def async_set(self, address: str, value: int) -> None:
+        self.writes.append((address, value))
+
+    async def async_get(self, address: str) -> int | None:
+        return self._reports
+
+
+class _SetpointCoordinator:
+    def __init__(self, client) -> None:
+        self.client = client
+        self.values: dict[int, int] = {}
+        self.noted: list[tuple[int, int]] = []
+
+    def async_note_write(self, address: int, value: int) -> None:
+        self.noted.append((address, value))
+
+
+def _climate_entity(controller, reports):
+    import asyncio
+
+    from custom_components.is3_export.climate import Is3Climate
+
+    entity = Is3Climate.__new__(Is3Climate)
+    entity.controller = controller
+    entity.coordinator = _SetpointCoordinator(_SetpointClient(reports))
+    entity._attr_name = controller.name
+    entity._setpoint_lock = asyncio.Lock()
+    entity._setpoint_wanted = None
+    entity.async_write_ha_state = lambda: None
+    return entity
+
+
+def test_a_zone_reporting_no_setpoint_is_not_an_error(controllers, monkeypatch) -> None:
+    """The zone is off; the write is taken at its word instead of being failed."""
+    import asyncio
+
+    import custom_components.is3_export.climate as climate
+
+    monkeypatch.setattr(climate, "MANUAL_SETTLE", 0)
+    monkeypatch.setattr(climate, "SETPOINT_VERIFY_DELAY", 0)
+
+    entity = _climate_entity(controllers["TOP_loz"], reports=None)
+
+    asyncio.run(entity.async_set_temperature(temperature=8.0))
+
+    assert (controllers["TOP_loz"].required, 800) in entity.coordinator.noted
+
+
+def test_a_contradicted_setpoint_is_still_an_error(controllers, monkeypatch) -> None:
+    """The zone reports a setpoint, and it is not the one asked for."""
+    import asyncio
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    import custom_components.is3_export.climate as climate
+
+    monkeypatch.setattr(climate, "MANUAL_SETTLE", 0)
+    monkeypatch.setattr(climate, "SETPOINT_VERIFY_DELAY", 0)
+
+    entity = _climate_entity(controllers["TOP_loz"], reports=2200)
+
+    with pytest.raises(HomeAssistantError):
+        asyncio.run(entity.async_set_temperature(temperature=8.0))
+
+
+def test_dragging_the_slider_writes_only_the_last_value(controllers, monkeypatch) -> None:
+    """Each slider step is its own service call, and each takes seconds.
+
+    Overlapping, they read back the value another had just written, concluded
+    their own had been refused, wrote again, and finally reported a failure for
+    a temperature nobody wanted any more.  Only the last request should reach
+    the unit; the ones overtaken on the way step aside.
+    """
+    import asyncio
+
+    import custom_components.is3_export.climate as climate
+
+    monkeypatch.setattr(climate, "MANUAL_SETTLE", 0)
+    monkeypatch.setattr(climate, "SETPOINT_VERIFY_DELAY", 0)
+
+    entity = _climate_entity(controllers["TOP_loz"], reports=None)
+    manual_hex = f"0x{controllers['TOP_loz'].manual:08X}"
+
+    async def drag() -> None:
+        await asyncio.gather(
+            *(entity.async_set_temperature(temperature=t) for t in (20.0, 19.5, 8.0))
+        )
+
+    asyncio.run(drag())
+
+    written = [value for address, value in entity.coordinator.client.writes
+               if address == manual_hex]
+    assert written, "nothing was written at all"
+    # The first call was already on its way before the others existed, so it
+    # goes out -- that cannot be helped.  What matters is that the zone is left
+    # holding the temperature that was asked for last, and that a value already
+    # overtaken while it queued never reaches the unit at all.
+    assert written[-1] == 800, f"the zone was left on the wrong setpoint: {written}"
+    assert 1950 not in written, f"a superseded setpoint was still written: {written}"
+
+
 def test_unique_id_is_stable(controllers) -> None:
     """The zone id is derived from the serial, not the position."""
     assert controllers["TOP_loz"].unique_id == "climate_0e0001"

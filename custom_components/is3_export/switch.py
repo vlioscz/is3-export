@@ -10,7 +10,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .api import Is3Error
+from .errors import Is3Error
 from .coordinator import Is3ConfigEntry, Is3Coordinator
 from .entity import Is3Entity
 from .export import PLATFORM_SWITCH, Is3Entry, find_covers, platform_of

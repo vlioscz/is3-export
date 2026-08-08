@@ -701,6 +701,36 @@ def _strip_name_direction(name: str) -> str:
     return "_".join(kept) if kept else name
 
 
+def _zone_of(entry: Is3Entry, zones: list[tuple[str, frozenset[str]]]) -> str | None:
+    """The heating zone this output belongs to, if it names one.
+
+    A zone's output relay is usually the zone's own name with a word inserted --
+    ``TOP_schd_up`` heated by ``TOP_rele_schd_up``.  Matching on the zone's
+    words being present, rather than on the whole name, survives that.
+    """
+    words = frozenset(entry.name.lower().split("_"))
+    for name, zone_words in zones:
+        if zone_words <= words:
+            return name
+    return None
+
+
+def _drives_two_zones(
+    up: Is3Entry, down: Is3Entry, zones: list[tuple[str, frozenset[str]]]
+) -> bool:
+    """Whether these two outputs heat two different rooms.
+
+    A blind's two relays drive one motor.  Two relays that each answer to a
+    *different* heating zone are that -- two independent outputs which happen to
+    have ``up`` and ``down`` in their names, as an upstairs and a downstairs
+    zone naturally do.  Pairing them would offer a blind whose "open" turns one
+    room's heating on and the other's off.
+    """
+    up_zone = _zone_of(up, zones)
+    down_zone = _zone_of(down, zones)
+    return up_zone is not None and down_zone is not None and up_zone != down_zone
+
+
 def _covers_from_named_relay_pairs(
     export: Is3Export, claimed: set[int]
 ) -> list[Is3Cover]:
@@ -709,7 +739,16 @@ def _covers_from_named_relay_pairs(
     Pairs a ``_UP`` output with the ``_DOWN`` output of the same base name on the
     same physical module.  Relays already taken by a JA3 driver pairing are
     skipped, so the two relay conventions never fight over one address.
+
+    Names are weak evidence, so a pair that looks like two heating outputs is
+    left alone: getting this wrong the other way costs nothing (two switches
+    stay two switches), while a wrong blind drives real relays.
     """
+    zones = [
+        (controller.name, frozenset(controller.name.lower().split("_")))
+        for controller in find_controllers(export)
+        if controller.name
+    ]
     groups: dict[tuple[str, str, str], dict[str, Is3Entry]] = {}
 
     for entry in export.entries:
@@ -730,6 +769,8 @@ def _covers_from_named_relay_pairs(
         if "up" not in pair or "down" not in pair:
             continue
         up, down = pair["up"], pair["down"]
+        if _drives_two_zones(up, down, zones):
+            continue
         covers.append(
             Is3Cover(
                 name=_strip_name_direction(up.name),
@@ -860,21 +901,6 @@ class Is3Controller:
                 addresses.append(optional)
         return addresses
 
-    @property
-    def temperature_addresses(self) -> list[int]:
-        """The computed temperature outputs, which may never push an event.
-
-        The controller derives these; on some units they are not emitted as
-        change events, so a value read once at startup would then freeze (a warm
-        room still showing its cold-morning reading).  They are re-read
-        periodically to self-heal -- kept apart from :attr:`read_addresses` so
-        that refresh stays a handful of addresses, not the whole zone.
-        """
-        addresses = [self.actual, self.required]
-        if self.cool_required is not None:
-            addresses.append(self.cool_required)
-        return addresses
-
 
 # Every controller carries the cool channels, whether or not a cooling output is
 # wired to the zone -- so their presence cannot say if the zone can cool.  What
@@ -985,6 +1011,11 @@ def expected_entities(export: Is3Export, entry_id: str) -> set[tuple[str, str]]:
         platform = platform_of(entry)
         if platform is not None:
             expected.add((platform, f"{entry_id}_{entry.unique_id}"))
+
+    # The unit's own status sensor comes from the connection, not from the
+    # export -- but it is still an entity this integration produces, so it has
+    # to be listed here or the pruning would delete it on every startup.
+    expected.add((PLATFORM_SENSOR, f"{entry_id}_unit_status"))
     return expected
 
 
