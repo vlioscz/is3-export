@@ -31,10 +31,14 @@ Jak byly protokoly zjištěny a co tenhle software je a co není:
 
 ## Co je otestované
 
-Tahle tabulka je o jediné věci: jestli jde seznam zařízení **naimportovat
-automaticky**, nebo se musí uložit z IDM3 a jednou nahrát. Všechno ostatní —
-čtení, zápisy, události, topení, stmívače, tlačítka — je ověřené na referenční
-instalaci, klasické CU3-0x s IDM3 03-04-19.
+Ovládání — čtení, zápisy, události, topení, stmívače, tlačítka — je ověřené na
+referenční instalaci, klasické CU3-0x s IDM3 03-04-19, a čtení se zápisy navíc
+na **CU3-08M** s IDM3 03-05-03. To druhé je smyslem tohohle vydání: na novou
+generaci se předtím nedalo dosáhnout vůbec.
+
+Tabulka níž je o té jediné věci, která se pořád liší — jestli jde seznam
+zařízení **naimportovat automaticky**, nebo se musí uložit z IDM3 a jednou
+nahrát.
 
 | Jednotka | IDM3 | Automatický import |
 | --- | --- | --- |

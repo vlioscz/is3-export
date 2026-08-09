@@ -30,10 +30,14 @@ How the protocols were established, and what this software is and isn't:
 
 ## What has been tested
 
-This table is about one thing: whether the device list can be **imported
-automatically**, or has to be saved from IDM3 and uploaded once. Everything
-else — reads, writes, events, heating, dimmers, buttons — is verified on the
-reference installation, a classic CU3-0x on IDM3 03-04-19.
+Control — reads, writes, events, heating, dimmers, buttons — is verified on the
+reference installation, a classic CU3-0x on IDM3 03-04-19, and reads and writes
+on a **CU3-08M** on IDM3 03-05-03. That second one is the point of this release:
+the new generation could not be reached at all before it.
+
+What the table below is about is the one thing that still differs — whether the
+device list can be **imported automatically**, or has to be saved from IDM3 and
+uploaded once.
 
 | Unit | IDM3 | Automatic import |
 | --- | --- | --- |
