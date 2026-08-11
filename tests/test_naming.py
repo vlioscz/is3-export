@@ -18,10 +18,12 @@ from custom_components.is3_export.export import (
     ICON_SOCKET,
     PLATFORM_BINARY_SENSOR,
     PLATFORM_BUTTON,
+    PLATFORM_FAN,
     PLATFORM_LIGHT,
     PLATFORM_SENSOR,
     PLATFORM_NUMBER,
     PLATFORM_SWITCH,
+    is_named_fan,
     Is3Entry,
     effective_unit,
     is_impulse,
@@ -113,11 +115,26 @@ def test_supplementary_lighting_keeps_its_own_icon(name: str, icon) -> None:
 
 
 @pytest.mark.parametrize("name", ["Vent_koup", "VENT_WC_2np", "Vent_sauna"])
-def test_fans_get_a_fan_icon(name: str) -> None:
-    """A `vent` relay reads as a fan."""
+def test_fans_become_fans(name: str) -> None:
+    """A `vent` relay is a fan entity, not a switch that merely looks like one.
+
+    It then reads as a fan everywhere that matters: its own card, and a voice
+    assistant that understands "turn on the bathroom fan".
+    """
     entry = _entry(name)
-    assert platform_of(entry) == PLATFORM_SWITCH
-    assert entity_icon(entry) == ICON_FAN
+    assert is_named_fan(entry)
+    assert platform_of(entry) == PLATFORM_FAN
+
+
+def test_a_dimmable_fan_is_left_as_a_light() -> None:
+    """A fan on a dimmer has a speed, which a relay fan does not.
+
+    Rather than guess at what the percentage drives, it stays the light it was
+    already classified as.
+    """
+    dimmed = _entry("Vent_obyv", DIMMER, unit="%")
+    assert not is_named_fan(dimmed)
+    assert platform_of(dimmed) == PLATFORM_LIGHT
 
 
 @pytest.mark.parametrize("name", ["Zas_kuchyne", "ZAS_terasa", "zas_dilna"])
@@ -187,10 +204,7 @@ def test_lamp_icon_does_not_reach_a_switch() -> None:
 
 
 def test_icons_are_confined_to_their_platform() -> None:
-    """A fan word on a light, or a lamp word on a switch, is ignored."""
-    # `vent` only means a fan on a switch; a dimmer named so is still a light.
-    assert entity_icon(_entry("Vent_obyv", DIMMER, unit="%")) is None
-    # Ordinary switches carry no icon.
+    """Ordinary switches carry no icon of their own."""
     assert entity_icon(_entry("Stykac_napajeni")) is None
 
 
@@ -216,7 +230,6 @@ def test_light_words_on_a_system_bit_are_not_lights() -> None:
         "Rozvadec",
         "TOP_rele_kuch",
         "Stykac_napajeni",
-        "Vent_koup",
         "Zas_venku",
     ],
 )

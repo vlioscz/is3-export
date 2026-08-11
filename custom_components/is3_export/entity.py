@@ -7,7 +7,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, MANUFACTURER, MODEL
 from .coordinator import Is3Coordinator
-from .export import Is3Entry, enabled_by_default, entity_icon, module_of
+from .export import (
+    Is3Entry,
+    enabled_by_default,
+    entity_icon,
+    module_of,
+    visible_by_default,
+)
 
 
 class Is3Entity(CoordinatorEntity[Is3Coordinator]):
@@ -29,6 +35,12 @@ class Is3Entity(CoordinatorEntity[Is3Coordinator]):
         # entity list stays close to what the installer labelled -- bar a few
         # roles that may carry a real reading whatever their name.
         self._attr_entity_registry_enabled_default = enabled_by_default(entry)
+
+        # A wall panel's indicator LEDs are real outputs worth keeping, but a
+        # generated dashboard collects every switch in the house and they would
+        # crowd out the lights somebody actually wants on it.  So they exist and
+        # can be driven; they are just not put in front of anyone.
+        self._attr_entity_registry_visible_default = visible_by_default(entry)
 
         # An icon suggested by the name, so a fan or a mirror light reads as
         # itself. Platforms that set their own icon can still override this.

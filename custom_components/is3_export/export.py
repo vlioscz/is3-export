@@ -355,6 +355,7 @@ _LED_ROLE = re.compile(r"^(?P<colour>green|red)\d*$", re.IGNORECASE)
 
 PLATFORM_BUTTON = "button"
 PLATFORM_LIGHT = "light"
+PLATFORM_FAN = "fan"
 PLATFORM_SWITCH = "switch"
 PLATFORM_NUMBER = "number"
 PLATFORM_BINARY_SENSOR = "binary_sensor"
@@ -432,6 +433,22 @@ def entity_icon(entry: Is3Entry) -> str | None:
     return None
 
 
+def is_named_fan(entry: Is3Entry) -> bool:
+    """Whether the name marks this on/off output as a fan.
+
+    Same rule as :func:`is_named_light`, and for the same reason: only a
+    physical relay qualifies, because a system bit carrying the word is a
+    program flag rather than a fan.  Speed is not in question here -- a relay
+    has one -- so a dimmable output named for a fan is left as the light it
+    already was, rather than guessed at.
+    """
+    if not is_switchable(entry) or is_impulse(entry):
+        return False
+    if _class_of(entry) not in RELAY_OUTPUT:
+        return False
+    return VENT_TOKEN in name_tokens(entry)
+
+
 def platform_of(entry: Is3Entry) -> str | None:
     """Which platform an entry belongs to, or None if it produces no entity.
 
@@ -443,6 +460,8 @@ def platform_of(entry: Is3Entry) -> str | None:
         return PLATFORM_BUTTON
     if is_dimmable(entry) or is_named_light(entry):
         return PLATFORM_LIGHT
+    if is_named_fan(entry):
+        return PLATFORM_FAN
     if is_switchable(entry):
         return PLATFORM_SWITCH
     if is_number(entry):
@@ -1292,6 +1311,30 @@ def _is_always_hidden(entry: Is3Entry) -> bool:
         return True
     role = _role_from_hw_id(entry.hw_id) if entry.hw_id else None
     return role is not None and _SW_ROLE.match(role) is not None
+
+
+def is_indicator_led(entry: Is3Entry) -> bool:
+    """Whether this is a wall switch's own indicator LED.
+
+    A `Green1` or `Red2` on a wall controller lights the button, it does not
+    light a room.
+    """
+    role = _role_from_hw_id(entry.hw_id) if entry.hw_id else None
+    return bool(role and _LED_ROLE.match(role))
+
+
+def visible_by_default(entry: Is3Entry) -> bool:
+    """Whether the entity should be shown, as opposed to merely existing.
+
+    Indicator LEDs are hidden.  They are perfectly good outputs and stay
+    controllable from automations, but Home Assistant's generated dashboards
+    collect every switch in the house, and a wall panel's backlights would
+    outnumber the lights people actually want to see there.
+
+    Hidden is not the same as disabled: a disabled entity does not exist at
+    all, and these are worth keeping.
+    """
+    return not is_indicator_led(entry)
 
 
 def enabled_by_default(entry: Is3Entry) -> bool:

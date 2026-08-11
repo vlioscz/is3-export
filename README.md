@@ -134,6 +134,11 @@ history.
   on, the unit keeps a door open that takes no password and that this
   integration no longer uses.
 
+**0.2.1 moves fans.** An output named `Vent_…` used to be a switch that looked
+like a fan; it is a `fan` entity now, so `switch.…_vent_x` becomes
+`fan.…_vent_x`. Automations and dashboards pointing at the old one need the new
+name.
+
 **Rolling back to 0.1.x** means deleting the integration and adding it again —
 entity ids, areas and history go with it, so take a backup first if you want
 that door left open.
@@ -175,7 +180,7 @@ The address says what the output is; the name says what it's for.
 | `lamp` | `light` | floor lamp |
 | `zrc` | `light` | mirror |
 | `LED` | `light` | LED strip |
-| `vent` | `switch` | fan |
+| `vent` | `fan` | — |
 | `zas` | `switch` | socket |
 | `TL` (or `DIN` input) | `event` (`press` + `long_press`) | — |
 
@@ -285,6 +290,14 @@ by default**; enable them in the integration settings. Unnamed ones get their
 name from the role in the hardware ID (e.g. `Up`, `Green`). Also disabled, **even
 when named**: the **`SW` status inputs** of relays and the **fault/alert flags**
 (`OUF-Alert`, `0x0107`, `device_class problem`, diagnostic).
+
+A wall panel's **indicator LEDs** (`Green1`, `Red2`) are treated differently
+again: **enabled but hidden**. They stay switchable from an automation, they are
+simply kept out of the generated dashboards — a house of wall panels has more
+backlights than lamps, and they would crowd out the lights you meant to see.
+Unhide one under its entity settings. *This applies to entities created from
+0.2.1 onwards; on an installation set up before that, Home Assistant keeps the
+visibility it already recorded.*
 
 ### RF devices
 

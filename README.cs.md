@@ -137,6 +137,11 @@ instalace se povýší za chodu** — ID entit, oblasti i historie zůstávají.
   nemůže — a dokud je zapnuté, drží jednotka otevřené dveře, které nechtějí
   žádné heslo a které tahle integrace už nepoužívá.
 
+**0.2.1 stěhuje ventilátory.** Výstup pojmenovaný `Vent_…` býval vypínač, který
+jen vypadal jako ventilátor; teď je to entita `fan`, takže ze `switch.…_vent_x`
+je `fan.…_vent_x`. Automatizace a dashboardy, které míří na tu starou, potřebují
+nový název.
+
 **Návrat zpátky na 0.1.x** znamená integraci smazat a přidat znovu (ID entit,
 oblasti i historie jdou s ní), takže si napřed udělej zálohu, jestli chceš mít
 tuhle cestu otevřenou.
@@ -178,7 +183,7 @@ Adresa říká, čím výstup je; jméno říká, k čemu slouží.
 | `lamp` | `light` | stojací lampa |
 | `zrc` | `light` | zrcadlo |
 | `LED` | `light` | LED pásek |
-| `vent` | `switch` | ventilátor |
+| `vent` | `fan` | — |
 | `zas` | `switch` | zásuvka |
 | `TL` (nebo `DIN` vstup) | `event` (`press` + `long_press`) | — |
 
@@ -290,6 +295,14 @@ výchozím stavu vypnuté**; zapneš je v nastavení integrace. Nepojmenované d
 název z role v hardwarovém ID (např. `Up`, `Green`). Vypnuté jsou — a to **i
 když jsou pojmenované** — také **`SW` stavové vstupy** relé a **poruchové/alert
 příznaky** (`OUF-Alert`, `0x0107`, `device_class problem`, diagnostický).
+
+**Indikační LEDky** nástěnných panelů (`Green1`, `Red2`) mají zacházení ještě
+jiné: **zapnuté, ale skryté**. Z automatizace se s nimi dál dá spínat, jen se
+nepletou do automaticky generovaných dashboardů — dům plný nástěnných panelů má
+víc podsvícení než lamp a vytlačilo by ti to světla, která jsi tam chtěl vidět.
+Odkrýt se dá v nastavení entity. *Platí pro entity vzniklé od 0.2.1 dál; na
+instalaci založené dřív si Home Assistant nechá viditelnost, kterou už má
+zapsanou.*
 
 ### RF zařízení
 
