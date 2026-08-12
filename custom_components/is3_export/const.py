@@ -49,6 +49,14 @@ DEFAULT_PORT: Final = 9999
 
 DEFAULT_SCAN_INTERVAL: Final = timedelta(seconds=30)
 
+# What the refresh drops to on a unit that will not turn its event stream on.
+# There, the sweep is not a safety net behind the pushed values -- it is the
+# only way anything is ever heard, and a light switched at the wall would sit
+# unreported for half a minute.  A whole installation is a handful of datagrams
+# and well under a second, so the shorter interval is affordable; it is not the
+# default only because it buys nothing on a unit that is already telling us.
+POLL_ONLY_SCAN_INTERVAL: Final = timedelta(seconds=10)
+
 # The device list only changes when the installer republishes it from IDM3, so
 # it is re-read far less often than values are refreshed.
 EXPORT_RELOAD_INTERVAL: Final = timedelta(minutes=30)

@@ -74,6 +74,11 @@ def build_diagnostics(
             # values follow the refresh cycle instead of arriving as they
             # change.  Not a fault, but it explains a sluggish-looking install.
             "events_started": getattr(coordinator.client, "events_started", None),
+            "refresh_interval": str(coordinator.update_interval),
+            # Anything above zero is worth explaining: a datagram that arrived
+            # looking like this protocol and failed its checksum is not what a
+            # healthy link does, and it is the one fault that hides completely.
+            "corrupt_datagrams": getattr(coordinator.client, "corrupt_datagrams", None),
         },
         "header": {
             "version": header.version if header else None,

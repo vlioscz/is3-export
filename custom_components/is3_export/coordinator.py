@@ -26,7 +26,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN, EXPORT_RELOAD_INTERVAL
+from .const import (
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    EXPORT_RELOAD_INTERVAL,
+    POLL_ONLY_SCAN_INTERVAL,
+)
 from .client import Is3Client
 from .protocol import UnitState
 from .errors import Is3AuthError, Is3Error
@@ -392,8 +397,28 @@ class Is3Coordinator(DataUpdateCoordinator[Is3Data]):
         )
         self._seeded = True
         await self._async_read_unit_state()
+        self._async_follow_event_stream()
 
         return Is3Data(export=export, values=dict(self._values))
+
+    @callback
+    def _async_follow_event_stream(self) -> None:
+        """Match the refresh interval to whether the unit pushes its changes.
+
+        Checked every cycle rather than once at setup: the stream is asked for
+        again on each reconnect, so a unit can start pushing -- or stop -- long
+        after the entry was loaded.  The base coordinator reads this attribute
+        when it schedules the next run, which is after this returns, so setting
+        it here needs nothing rescheduled.
+        """
+        wanted = (
+            DEFAULT_SCAN_INTERVAL
+            if getattr(self.client, "events_started", True)
+            else POLL_ONLY_SCAN_INTERVAL
+        )
+        if self.update_interval != wanted:
+            _LOGGER.debug("Refreshing every %s", wanted)
+            self.update_interval = wanted
 
     async def _async_read_unit_state(self) -> None:
         """Ask the unit how it is running, for the diagnostic sensor.

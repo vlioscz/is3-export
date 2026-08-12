@@ -12,6 +12,10 @@ from __future__ import annotations
 
 import asyncio
 
+from custom_components.is3_export.const import (
+    DEFAULT_SCAN_INTERVAL,
+    POLL_ONLY_SCAN_INTERVAL,
+)
 from custom_components.is3_export.coordinator import Is3Coordinator
 from custom_components.is3_export.errors import Is3AuthError, Is3ConnectionError
 from custom_components.is3_export.export import Is3Entry, Is3Export
@@ -86,6 +90,9 @@ def _coordinator(clock: _Clock, client) -> Is3Coordinator:
     coord.unit_state = None
     coord._unit_state_listeners = []
     coord._project_digest = None
+    # The base class' own, and read through its property: the refresh cycle
+    # changes it to keep up with a unit that will not push its values.
+    coord.update_interval = DEFAULT_SCAN_INTERVAL
     return coord
 
 
@@ -196,3 +203,40 @@ def test_an_unreachable_unit_fails_the_update() -> None:
     except UpdateFailed:
         return
     raise AssertionError("an unreachable unit must raise UpdateFailed")
+
+
+def test_a_unit_that_will_not_push_is_polled_more_often() -> None:
+    """The sweep is a safety net where events arrive, and the only news where
+    they do not -- so it has to run closer together there."""
+    export = Is3Export(entries=[Is3Entry(name="Lampa", address=LAMP, value=0)])
+    client = _Client({LAMP_HEX: 1})
+    client.events_started = False
+    coord = _coordinator(_Clock(), client)
+
+    async def _read_export() -> Is3Export:
+        return export
+
+    coord._async_read_export = _read_export  # type: ignore[method-assign]
+
+    asyncio.run(coord._async_update_data())
+
+    assert coord.update_interval == POLL_ONLY_SCAN_INTERVAL
+
+
+def test_a_unit_that_starts_pushing_later_goes_back_to_the_slow_cycle() -> None:
+    """The stream is asked for again on every reconnect, so this can flip back."""
+    export = Is3Export(entries=[Is3Entry(name="Lampa", address=LAMP, value=0)])
+    client = _Client({LAMP_HEX: 1})
+    client.events_started = False
+    coord = _coordinator(_Clock(), client)
+
+    async def _read_export() -> Is3Export:
+        return export
+
+    coord._async_read_export = _read_export  # type: ignore[method-assign]
+
+    asyncio.run(coord._async_update_data())
+    client.events_started = True
+    asyncio.run(coord._async_update_data())
+
+    assert coord.update_interval == DEFAULT_SCAN_INTERVAL

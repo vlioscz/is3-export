@@ -64,6 +64,19 @@ value first and putting it back afterwards; a zone is only ever asked for a
 temperature below the room it is in, so nothing calls for heat. Use it before
 releasing anything that touches setup.
 
+`tools/ha_reconfigure.py <host>` covers the other half of the dialog: it
+republishes the unit's own export under a new installation id, with one entry
+removed and one added, uploads it through the reconfigure form exactly as the
+front end would, and checks that the entry adopts the new identity and comes
+back with the devices rearranged. It only ever reads from the unit.
+
+```bash
+python tools/ha_reconfigure.py 192.168.1.10
+```
+
+On a unit whose firmware serves no export over HTTP, pass `--export <file>` to
+give it the starting point it cannot fetch.
+
 `tools/compat_check.py <host>` is the other half: it fingerprints every
 assumption the protocol code makes and can diff two fingerprints, which is how
 a firmware change gets caught deliberately rather than by a bug report. Take one

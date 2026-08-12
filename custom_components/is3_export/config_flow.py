@@ -146,7 +146,13 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
     MINOR_VERSION = 1
 
     def __init__(self) -> None:
-        """Track the text of an export dropped into the current form."""
+        """Hold the text of an export dropped into the form.
+
+        For as long as the dialog is open, not just for one submit: Home
+        Assistant deletes an uploaded file the moment it is read, so a form
+        that comes back with an error has an empty file picker and no way to
+        offer the same file again.
+        """
         self._uploaded_text: str | None = None
 
     async def async_step_user(
@@ -191,7 +197,9 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
                 # unit Home Assistant is already talking to elsewhere.
                 if self._owned_by_another_entry(unique_id, entry.entry_id):
                     return self.async_abort(reason="wrong_unit")
-                await self._async_store_upload(user_input, unique_id)
+                await self._async_store_upload(
+                    user_input, unique_id, entry.data.get(CONF_EXPORT_FILE, "")
+                )
                 # Entity ids hang off the entry id, not off this, so adopting the
                 # new identity costs nothing that is on screen.
                 return self.async_update_reload_and_abort(
@@ -251,7 +259,6 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
         """Load the export and check the unit answers; return (export, errors)."""
         errors: dict[str, str] = {}
         export: Is3Export | None = None
-        self._uploaded_text = None
 
         try:
             export = await self._async_load_export(user_input)
@@ -336,14 +343,27 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _async_load_export(self, user_input: dict[str, Any]) -> Is3Export:
         """Load the export: an uploaded file, a path on disk, or the unit itself."""
         if file_id := user_input.get(CONF_EXPORT_UPLOAD):
+            # A new file replaces whatever was being held.  Dropped first, so a
+            # file that turns out to be unreadable cannot leave the previous one
+            # in place to be used by the next submit -- accepting a file the
+            # form has just rejected.
+            self._uploaded_text = None
             text = await self.hass.async_add_executor_job(
                 self._read_uploaded_file, file_id
             )
             export = parse_export_text(text, "the uploaded file")
-            # Kept only after the whole validation passes, so a rejected form
-            # leaves nothing behind.
             self._uploaded_text = text
             return export
+
+        if self._uploaded_text is not None:
+            # An upload from an earlier attempt at this same dialog.  The file
+            # picker is empty again -- Home Assistant deleted the file when it
+            # was read -- so without this, correcting a password and pressing
+            # submit would fall through to the path below and quietly
+            # reconfigure onto the *previous* export.  Which looks, from the
+            # outside, exactly like an upload that did nothing: the dialog
+            # closes, the entry reloads, and none of the new devices are there.
+            return parse_export_text(self._uploaded_text, "the uploaded file")
 
         if path := user_input.get(CONF_EXPORT_FILE, "").strip():
             return await self.hass.async_add_executor_job(read_export_file, Path(path))
@@ -363,7 +383,7 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
             return path.read_text(encoding="utf-8-sig", errors="replace")
 
     async def _async_store_upload(
-        self, user_input: dict[str, Any], unique_id: str
+        self, user_input: dict[str, Any], unique_id: str, previous: str = ""
     ) -> None:
         """Keep an uploaded export as a file, so the entry stores only a path.
 
@@ -376,13 +396,22 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._uploaded_text is None:
             return
         user_input[CONF_EXPORT_FILE] = await self.hass.async_add_executor_job(
-            self._write_saved_export, unique_id, self._uploaded_text
+            self._write_saved_export, unique_id, self._uploaded_text, previous
         )
 
-    def _write_saved_export(self, unique_id: str, text: str) -> str:
-        """Write the uploaded export under the config folder (executor)."""
+    def _write_saved_export(self, unique_id: str, text: str, previous: str) -> str:
+        """Write the uploaded export under the config folder (executor).
+
+        A unit that already keeps its export here keeps the same file.  The
+        name is made from the installation id, and republishing a project is
+        exactly what changes that id -- so naming by it alone would drop a new
+        file into the folder on every republish, with nothing to say which of
+        them the entry is actually reading.
+        """
         folder = Path(self.hass.config.path(SAVED_EXPORT_DIR))
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / saved_export_filename(unique_id)
+        if previous and Path(previous).parent == folder:
+            path = Path(previous)
         path.write_text(text, encoding="utf-8")
         return str(path)

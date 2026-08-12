@@ -8,6 +8,7 @@ are what a classification question is about, are kept.
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,7 +26,13 @@ def _coordinator(export, values):
     return SimpleNamespace(
         data=SimpleNamespace(export=export, values=values),
         reads_supported=True,
-        client=SimpleNamespace(connected=True, delimiter=" "),
+        update_interval=timedelta(seconds=30),
+        client=SimpleNamespace(
+            connected=True,
+            delimiter=" ",
+            events_started=True,
+            corrupt_datagrams=0,
+        ),
     )
 
 

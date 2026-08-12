@@ -117,9 +117,14 @@ class Is3Client:
         self._keepalive_task: asyncio.Task[None] | None = None
         self._reconnect_task: asyncio.Task[None] | None = None
         self._warned_foreign = False
+        # Datagrams that arrived looking right and failed their checksum.  Never
+        # normal on a working link, and invisible from the outside, so it is
+        # counted and reported in the diagnostics rather than only logged.
+        self.corrupt_datagrams = 0
         # Whether the unit turned its push stream on.  Not every one does, and
         # it is not fatal -- it only means changes wait for the next refresh.
         self.events_started = False
+        self._events_refused = False
 
     # ---- public interface (mirrors Is3Client) ----------------------------
 
@@ -298,9 +303,27 @@ class Is3Client:
         return True
 
     async def _event_start(self) -> bool:
-        """Turn on the push stream; False if the unit did not acknowledge."""
-        reply = await self._send_once(proto.T_EVENT, 0x02, 0x00)
-        return reply is not None and reply.is_ack
+        """Turn on the push stream; False if the unit did not acknowledge.
+
+        Asked for over four attempts the first time -- a datagram lost on the
+        way must not cost a session its events for as long as it lasts.  But
+        once a unit has declined, repeating that on every reconnect is twelve
+        seconds of waiting for a silence we have already been told about, so
+        after the first refusal it is asked once and dropped.
+
+        Which of the two it was is worth knowing and cannot be told apart from
+        the outside: a unit that says nothing may not understand the request,
+        while one that refuses it understood and said no.
+        """
+        reply = await self._send_once(
+            proto.T_EVENT, 0x02, 0x00, retries=1 if self._events_refused else None
+        )
+        if reply is None:
+            _LOGGER.debug("%s did not answer the request to start events", self.host)
+        elif not reply.is_ack:
+            _LOGGER.debug("%s refused the request to start events", self.host)
+        self._events_refused = reply is None or not reply.is_ack
+        return not self._events_refused
 
     def _start_keepalive(self) -> None:
         if self._keepalive_task is None or self._keepalive_task.done():
@@ -353,6 +376,7 @@ class Is3Client:
         data: bytes = b"",
         *,
         auth: bool = True,
+        retries: int | None = None,
     ) -> proto.Packet | None:
         """Send one request and await its matching reply, resending on loss."""
         if self._transport is None:
@@ -360,7 +384,7 @@ class Is3Client:
         async with self._lock:
             loop = asyncio.get_running_loop()
             token = self._token if auth else b"\x00" * 8
-            for _ in range(REQUEST_RETRIES):
+            for _ in range(retries if retries is not None else REQUEST_RETRIES):
                 # Awaiting a reply yields the loop, and both the keepalive and a
                 # config-entry unload drop the transport without taking the
                 # lock -- so it can vanish between two attempts of a request
@@ -417,6 +441,7 @@ class Is3Client:
             # UDP's own checksum is only 16 bits and optional; without this a
             # corrupted reply is parsed as values and a corrupted push is
             # written into entity state as though the unit had said it.
+            self.corrupt_datagrams += 1
             _LOGGER.debug("Dropping a corrupt datagram from %s", self.host)
             return
         # Unsolicited push (EventValue 04/01/00).

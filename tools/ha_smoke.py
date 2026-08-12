@@ -25,13 +25,13 @@ Nothing is printed that identifies the installation beyond the host you typed.
 import argparse
 import asyncio
 import logging
-import shutil
 import sys
-import tempfile
 import time
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _harness import REPO, boot, make_config_dir  # noqa: E402,F401
 
 ARGS = argparse.ArgumentParser(description="Home Assistant smoke test against a live unit")
 ARGS.add_argument("host", help="the central unit's address")
@@ -44,32 +44,8 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(mes
 if OPTS.debug:
     logging.getLogger("custom_components.is3_export").setLevel(logging.DEBUG)
 
-from homeassistant import auth, bootstrap, config_entries, core, loader  # noqa: E402
+from homeassistant import config_entries  # noqa: E402
 from homeassistant.const import CONF_HOST, CONF_PORT  # noqa: E402
-from homeassistant.setup import async_setup_component  # noqa: E402
-from homeassistant.util import dt as dt_util  # noqa: E402
-
-
-async def boot(config_dir: Path) -> core.HomeAssistant:
-    """Bring up a minimal but genuine Home Assistant."""
-    hass = core.HomeAssistant(str(config_dir))
-    hass.config.config_dir = str(config_dir)
-    hass.config.skip_pip = True
-    hass.config.latitude, hass.config.longitude = 50.0, 15.0
-    hass.config.time_zone = "Europe/Prague"
-    dt_util.set_default_time_zone(await dt_util.async_get_time_zone("Europe/Prague"))
-
-    loader.async_setup(hass)
-    hass.config_entries = config_entries.ConfigEntries(hass, {"config": {}})
-    await bootstrap.async_load_base_functionality(hass)
-    # file_upload (the integration declares it) pulls in http, which refuses to
-    # start without an auth manager.
-    hass.auth = await auth.auth_manager_from_config(hass, [], [])
-    hass.set_state(core.CoreState.starting)
-
-    for component in ("homeassistant", "file_upload"):
-        assert await async_setup_component(hass, component, {}), component
-    return hass
 
 
 def make_entry(unique_id: str) -> config_entries.ConfigEntry:
@@ -96,12 +72,7 @@ def make_entry(unique_id: str) -> config_entries.ConfigEntry:
 
 
 async def main() -> int:
-    config_dir = Path(tempfile.mkdtemp(prefix="ha-is3-"))
-    (config_dir / "custom_components").mkdir()
-    shutil.copytree(
-        REPO / "custom_components" / "is3_export",
-        config_dir / "custom_components" / "is3_export",
-    )
+    config_dir = make_config_dir()
     print(f"config dir: {config_dir}")
 
     hass = await boot(config_dir)
