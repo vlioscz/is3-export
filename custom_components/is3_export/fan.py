@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.fan import FanEntity
+from homeassistant.components.fan import FanEntity, FanEntityFeature
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -51,6 +51,14 @@ async def async_setup_entry(
 
 class Is3Fan(Is3Entity, FanEntity, RestoreEntity):
     """A fan on a relay: on or off, no speed."""
+
+    # Being able to switch it on has to be declared, even though there is
+    # nothing else this entity can do and both methods are implemented below.
+    # Home Assistant reads only this when it decides whether to allow the
+    # action, so leaving it out gave a fan that appeared, showed its state
+    # correctly, and refused fan.turn_on -- which is worse than never having
+    # made it a fan.
+    _attr_supported_features = FanEntityFeature.TURN_ON | FanEntityFeature.TURN_OFF
 
     # The icon comes from the fan domain itself; the name-derived one would be
     # the same picture with less meaning behind it.

@@ -247,6 +247,42 @@ async def exercise(hass, entry) -> int:
     else:
         print("   no dimmable light found")
 
+    # A fan is a relay like any other, but it sits on a platform that refuses
+    # an action unless the entity declared it -- so it can look perfect and do
+    # nothing.  Driving one here is the only thing that would have caught that.
+    fans = [s for s in hass.states.async_all() if s.domain == "fan"]
+    print(f"\n=== FANS ({len(fans)}) ===")
+    if fans:
+        fan = fans[0]
+        was_on = fan.state == "on"
+        print(f"fan {fan.entity_id}: state={fan.state}")
+        try:
+            t0 = time.perf_counter()
+            await hass.services.async_call(
+                "fan", "turn_on" if not was_on else "turn_off",
+                {"entity_id": fan.entity_id}, blocking=True,
+            )
+            await hass.async_block_till_done()
+            now = hass.states.get(fan.entity_id)
+            print(f"   toggled -> state={now.state}  [{time.perf_counter()-t0:.2f}s]"
+                  f"  {'OK' if (now.state == 'on') != was_on else 'MISMATCH'}")
+            failures += (now.state == "on") == was_on
+            await asyncio.sleep(2)
+            await hass.services.async_call(
+                "fan", "turn_on" if was_on else "turn_off",
+                {"entity_id": fan.entity_id}, blocking=True,
+            )
+            await hass.async_block_till_done()
+            back = hass.states.get(fan.entity_id)
+            print(f"   restored -> state={back.state}"
+                  f"  {'OK' if (back.state == 'on') == was_on else 'MISMATCH'}")
+            failures += (back.state == "on") != was_on
+        except Exception as err:  # noqa: BLE001 - the point is to report it
+            print(f"   FAILED: {type(err).__name__}: {err}")
+            failures += 1
+    else:
+        print("   no fan in this export")
+
     print("\n=== UNLOAD ===")
     ok = await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
