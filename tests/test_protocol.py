@@ -16,7 +16,7 @@ import pytest
 from custom_components.is3_export import checksum as crc
 from custom_components.is3_export import protocol as proto
 from custom_components.is3_export.client import Is3Client
-from custom_components.is3_export.errors import Is3ConnectionError
+from custom_components.is3_export.errors import Is3AuthError, Is3ConnectionError
 
 # A GetState reply captured from a live CU, verbatim.  It is the ground truth
 # for the header layout and for the checksum model.
@@ -177,6 +177,11 @@ def _make_client(responder) -> Is3Client:
     client._transport.responder = responder
     client._connected = True
     client._token = b"\x01" * 8
+
+    async def _keep_the_fake_transport() -> None:
+        """async_connect would otherwise open a real socket over the top."""
+
+    client._open = _keep_the_fake_transport
     return client
 
 
@@ -229,6 +234,42 @@ def test_an_unanswered_batch_says_which_one_it_was() -> None:
     message = str(raised.value)
     assert "0x01020000" in message and "0x01020027" in message, message
     assert "batch 1 of 2" in message, message
+
+
+def test_a_silent_host_is_not_reported_as_a_wrong_password() -> None:
+    """A UDP socket opens against an address with nothing behind it.
+
+    Without an unauthenticated question first, the handshake ran all four of
+    its steps into silence and then reported the only failure it could tell
+    apart -- a refused password -- which sends someone checking credentials
+    when the unit is simply not there.
+    """
+    client = _make_client(lambda request: None)
+    client._connected = False
+
+    with pytest.raises(Is3ConnectionError) as raised:
+        asyncio.run(client.async_connect())
+
+    assert not isinstance(raised.value, Is3AuthError), "blamed the password"
+    assert "No answer" in str(raised.value)
+
+
+def test_a_unit_that_answers_but_refuses_still_blames_the_password() -> None:
+    """The distinction only works if a genuine refusal still reads as one."""
+
+    def responder(request):
+        # It answers the unauthenticated question, then refuses to authorize.
+        if request.tis == (proto.T_STARTSTOP, 0x03, 0x00):
+            return _reply(request, b"\x20")
+        if request.tis == (proto.T_STARTSTOP, 0x06, 0x01):
+            return _reply(request, b"", address=proto.ADDR_CU_NACK)
+        return _reply(request, b"")
+
+    client = _make_client(responder)
+    client._connected = False
+
+    with pytest.raises(Is3AuthError):
+        asyncio.run(client.async_connect())
 
 
 def test_a_refused_write_raises() -> None:

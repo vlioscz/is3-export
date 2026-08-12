@@ -128,6 +128,19 @@ class Is3Client:
         """Open the socket, authorize, and start the event stream."""
         self._closing = False
         await self._open()
+
+        # Ask something unauthenticated first.  A UDP socket "opens" against an
+        # address with nothing behind it, so without this the handshake runs its
+        # four steps into silence -- three quarters of a minute -- and then
+        # reports the only failure it can distinguish, a refused password.
+        # Being told the password is wrong when the unit is simply not there
+        # sends people looking in exactly the wrong place.
+        if await self._send_once(proto.T_STARTSTOP, 0x03, 0x00, auth=False) is None:
+            await self._teardown()
+            raise Is3ConnectionError(
+                f"No answer from {self.host}:{self.port}"
+            )
+
         if not await self._authorize():
             await self._teardown()
             raise Is3AuthError(

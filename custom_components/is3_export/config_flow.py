@@ -2,13 +2,17 @@
 
 Setup, reconfigure and re-authentication share one validation path: load the
 export (from the unit, a local file, or a file dropped straight into the form),
-then connect to the unit and *read* one address.
+then connect to the unit and *read some addresses back*.
 
 The read is the part that matters.  A unit hands back a session token even when
 the password is not the one it wanted, and only then quietly ignores every
 request for a value -- so a connection that succeeded proves nothing.  Without
 reading something back, a wrong password would sail through setup and leave
 every entity blank with nothing to explain why.
+
+Several addresses, not one: any single address may be one this unit will not
+answer, and refusing the whole form over that told people a unit it had just
+shaken hands with was unreachable.
 
 The upload exists because newer CU3 firmware no longer serves the export over
 HTTP, and copying the file onto the Home Assistant machine by hand is a chore.
@@ -39,7 +43,7 @@ from homeassistant.helpers.selector import (
 from homeassistant.util import slugify
 
 from .client import Is3Client, async_password_required
-from .errors import Is3AuthError, Is3ConnectionError
+from .errors import Is3AuthError, Is3ConnectionError, Is3Error
 from .const import (
     CONF_EXPORT_FILE,
     CONF_EXPORT_UPLOAD,
@@ -93,6 +97,24 @@ def build_schema(defaults: dict[str, Any]) -> vol.Schema:
             ),
         }
     )
+
+
+# How many addresses the setup form reads to prove the unit answers.  More than
+# one because any single address may be one this unit will not answer, and that
+# is not a reason to refuse the whole form; few enough to stay in one datagram.
+PROBE_COUNT = 8
+
+# Every installation has relays low in the address space; used when there is no
+# export to pick from, as in the re-authentication step.
+FALLBACK_PROBES = ("0x01020001", "0x01020002", "0x01020003")
+
+
+def _probe_addresses(export: Is3Export | None) -> list[str]:
+    """A handful of readable addresses, to ask the unit for in one go."""
+    if export is None:
+        return list(FALLBACK_PROBES)
+    readable = [e.address_hex for e in export.entries if is_readable(e)]
+    return readable[:PROBE_COUNT] or list(FALLBACK_PROBES)
 
 
 def saved_export_filename(unique_id: str) -> str:
@@ -272,24 +294,36 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
         and only afterwards decides whether to answer.  Where the export is at
         hand a real address from it is used; the reauth step has none loaded, so
         it falls back to an address every unit has.
-        """
-        probe = next((e for e in export.entries if is_readable(e)), None) if export else None
-        address = probe.address_hex if probe is not None else "0x01020001"
 
+        Several addresses are asked for at once, in one datagram.  Reading a
+        single one made the whole form depend on that one address answering,
+        and reported a unit it had just shaken hands with as unreachable when
+        it did not.
+        """
         client = Is3Client(host, port, password)
         try:
-            await client.async_connect()
-            await client.async_get(address)
-        except Is3AuthError:
-            # The unit will say whether it has a password at all, without being
-            # authorized -- so tell the difference between "you left this blank
-            # and it needs one" and "the one you typed is wrong".
-            needs_password = await async_password_required(host, port)
-            if needs_password and not password:
-                return {CONF_PASSWORD: "password_required"}
-            return {CONF_PASSWORD: "invalid_auth"}
-        except Is3ConnectionError:
-            return {CONF_HOST: "cannot_connect"}
+            try:
+                await client.async_connect()
+            except Is3AuthError:
+                # The unit says whether it has a password at all without being
+                # authorized, so tell "you left this blank and it needs one"
+                # apart from "the one you typed is wrong".
+                needs_password = await async_password_required(host, port)
+                if needs_password and not password:
+                    return {CONF_PASSWORD: "password_required"}
+                return {CONF_PASSWORD: "invalid_auth"}
+            except Is3ConnectionError:
+                return {CONF_HOST: "cannot_connect"}
+
+            try:
+                await client.async_get_many(_probe_addresses(export))
+            except Is3Error:
+                # It answered the handshake, so it is there and reachable.  A
+                # data plane that then says nothing is what a password the unit
+                # did not want looks like -- it hands out a token either way and
+                # only afterwards decides whether to answer.
+                _LOGGER.debug("%s connected but answered no reads", host)
+                return {CONF_PASSWORD: "invalid_auth"}
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Unexpected error connecting to the unit")
             return {"base": "unknown"}
