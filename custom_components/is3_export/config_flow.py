@@ -52,7 +52,7 @@ from .const import (
     DOMAIN,
     SAVED_EXPORT_DIR,
 )
-from .export import Is3Export, is_readable
+from .export import Is3Export, is_press_button, is_readable
 from .source import (
     Is3ExportAuthError,
     Is3ExportError,
@@ -110,10 +110,21 @@ FALLBACK_PROBES = ("0x01020001", "0x01020002", "0x01020003")
 
 
 def _probe_addresses(export: Is3Export | None) -> list[str]:
-    """A handful of readable addresses, to ask the unit for in one go."""
+    """A handful of readable addresses, to ask the unit for in one go.
+
+    Buttons are passed over.  Nothing goes wrong here -- the answer is thrown
+    away and no event is raised -- but the coordinator refuses to read a button
+    for a good reason, and an installation whose export opens with a wall panel
+    would otherwise have this form probing nothing else.  Leaving the one place
+    that reads them looking deliberate invites someone to reuse it.
+    """
     if export is None:
         return list(FALLBACK_PROBES)
-    readable = [e.address_hex for e in export.entries if is_readable(e)]
+    readable = [
+        e.address_hex
+        for e in export.entries
+        if is_readable(e) and not is_press_button(e)
+    ]
     return readable[:PROBE_COUNT] or list(FALLBACK_PROBES)
 
 
@@ -276,7 +287,14 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
                 if user_input.get(CONF_EXPORT_UPLOAD)
                 else CONF_EXPORT_FILE
             )
-            errors[failed] = "invalid_export"
+            # Nothing was offered and asking the unit came to nothing, which is
+            # what newer firmware does: it serves no export over HTTP at all.
+            # "The export could not be read" is true and useless there -- there
+            # was no export to read, and what is needed is the file.
+            errors[failed] = (
+                "invalid_export" if self._export_was_offered(user_input)
+                else "export_unavailable"
+            )
 
         if not errors and export is not None:
             errors = await self._async_check_password(
@@ -339,6 +357,14 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
             # against the unit for as long as Home Assistant is up.
             await client.async_close()
         return {}
+
+    def _export_was_offered(self, user_input: dict[str, Any]) -> bool:
+        """Whether the export came from the person filling the form."""
+        return bool(
+            user_input.get(CONF_EXPORT_UPLOAD)
+            or user_input.get(CONF_EXPORT_FILE, "").strip()
+            or self._uploaded_text is not None
+        )
 
     async def _async_load_export(self, user_input: dict[str, Any]) -> Is3Export:
         """Load the export: an uploaded file, a path on disk, or the unit itself."""

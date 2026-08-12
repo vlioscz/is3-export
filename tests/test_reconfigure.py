@@ -219,3 +219,51 @@ def test_a_path_outside_our_own_folder_is_never_written_over(tmp_path) -> None:
 
     assert Path(written).name == "unit_id.is3"
     assert not elsewhere.exists()
+
+
+def test_the_form_does_not_probe_buttons() -> None:
+    """The coordinator refuses to read a button, and for a good reason.
+
+    Nothing goes wrong here -- the answer is thrown away -- but an installation
+    whose export opens with a wall panel would have had this form probing
+    nothing but buttons, and leaving the one place that reads them looking
+    deliberate invites someone to reuse it.
+    """
+    export = Is3Export(
+        entries=[
+            Is3Entry(name="TL_chodba", address=0x01010017, value=0,
+                     hw_id="WSB3-40_DIN1_0B0003"),
+            Is3Entry(name="Up1", address=0x01010001, value=0,
+                     hw_id="WSB3-40_Up1_0B0003"),
+            Is3Entry(name="Sv_kuchyne", address=0x0102000A, value=0),
+        ]
+    )
+
+    assert _probe_addresses(export) == ["0x0102000A"]
+
+
+def test_an_installation_of_nothing_but_buttons_still_probes_something() -> None:
+    """Falling through to no addresses at all would fail every form."""
+    export = Is3Export(
+        entries=[
+            Is3Entry(name="TL_chodba", address=0x01010017, value=0,
+                     hw_id="WSB3-40_DIN1_0B0003"),
+        ]
+    )
+
+    assert _probe_addresses(export) == list(FALLBACK_PROBES)
+
+
+def test_a_unit_that_serves_no_export_says_so() -> None:
+    """Newer firmware serves none at all, and "could not be read" sends people
+    looking for a corrupt file instead of uploading one."""
+    flow = Is3ConfigFlow.__new__(Is3ConfigFlow)
+    flow._uploaded_text = None
+
+    assert not flow._export_was_offered({"host": "192.168.1.10"})
+    assert not flow._export_was_offered({"export_file": "   "})
+    assert flow._export_was_offered({"export_file": "C:/exports/house.is3"})
+    assert flow._export_was_offered({"export_upload": "upload-1"})
+
+    flow._uploaded_text = EXPORT
+    assert flow._export_was_offered({}), "an upload held from an earlier submit"

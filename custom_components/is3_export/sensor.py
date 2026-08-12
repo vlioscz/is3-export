@@ -152,11 +152,25 @@ class Is3UnitStatusSensor(CoordinatorEntity[Is3Coordinator], SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, str] | None:
-        """The unit's own clock, when it reports one."""
+        """The unit's own clock, and how its values are getting here.
+
+        Whether the unit pushes its changes decides whether a light switched at
+        the wall shows up at once or on the next sweep, and it is the first
+        thing worth knowing about an installation that feels slow.  Having it
+        only in the downloadable diagnostics meant nobody found it.
+        """
+        attributes = {
+            "value_source": (
+                "pushed by the unit"
+                if getattr(self.coordinator.client, "events_started", True)
+                else "periodic refresh (this unit does not push changes)"
+            ),
+            "refresh_interval": str(self.coordinator.update_interval),
+        }
         state = self.coordinator.unit_state
-        if state is None or state.clock is None:
-            return None
-        return {"unit_clock": state.clock}
+        if state is not None and state.clock is not None:
+            attributes["unit_clock"] = state.clock
+        return attributes
 
 
 class Is3Sensor(Is3Entity, SensorEntity):

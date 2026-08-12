@@ -47,6 +47,7 @@
       "invalid_auth": "The central unit refused that password.",
       "password_required": "This central unit has a password set. Enter it.",
       "export_protected": "This unit will not hand over its export. Upload the export file, or enter the path to a local copy.",
+      "export_unavailable": "This unit does not serve its export over HTTP -- newer CU3 firmware does not. Upload the export file from iNELS Designer Manager, or enter the path to a copy on this machine.",
       "invalid_export": "The export could not be read or contains no entries",
       "unknown": "Unexpected error"
     },

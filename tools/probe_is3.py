@@ -164,7 +164,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  read {address:#010x} -> {shown}")
     print("  data plane OPEN")
 
-    probe.ask(0x04, 0x02, 0x00, auth=True)
+    # Whether the unit turns its push stream on, and if not, which way it
+    # declined.  Newer firmware does not, and saying nothing is a different
+    # fault from saying no: silence suggests the request is not understood at
+    # all, a refusal means it was and the answer was still no.  This is the one
+    # thing that cannot be worked out from Home Assistant's side, and the whole
+    # difference between values arriving as they happen and waiting for a sweep.
+    reply = probe.ask(0x04, 0x02, 0x00, auth=True)
+    if reply is None:
+        print("  event stream: NO ANSWER (asked and never replied)")
+    elif reply[0] & 0x80:
+        print(f"  event stream: REFUSED (address byte {reply[0]:#04x}, "
+              f"body {reply[1][:16].hex() or 'empty'})")
+    else:
+        print("  event stream: started")
+
     print(f"  listening {args.listen:.0f}s for pushed events...")
     seen: dict[int, int] = {}
     deadline = time.time() + args.listen

@@ -47,6 +47,7 @@
       "invalid_auth": "Centrální jednotka toto heslo odmítla.",
       "password_required": "Tahle centrální jednotka má nastavené heslo. Zadej ho.",
       "export_protected": "Tahle jednotka export nevydá. Nahraj soubor exportu, nebo zadej cestu k místní kopii.",
+      "export_unavailable": "Tato jednotka export po HTTP neposkytuje – novější firmware CU3 to neumí. Nahrajte soubor exportu z iNELS Designer Manageru, nebo zadejte cestu ke kopii na tomto počítači.",
       "invalid_export": "Export se nepodařilo přečíst nebo neobsahuje žádné položky",
       "unknown": "Neočekávaná chyba"
     },
