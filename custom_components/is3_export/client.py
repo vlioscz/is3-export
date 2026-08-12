@@ -163,7 +163,14 @@ class Is3Client:
         return (await self.async_get_many([address])).get(address)
 
     async def async_get_many(self, addresses: list[str]) -> dict[str, int | None]:
-        """Read many addresses; one datagram per batch of ``MAX_BATCH``."""
+        """Read many addresses; one datagram per batch of ``MAX_BATCH``.
+
+        A batch that goes unanswered fails the read, and with it the refresh
+        cycle -- which is the right answer when the unit has gone away, and is
+        the usual reason.  The error names the batch, because the alternative
+        (retrying smaller and smaller batches) would turn an unreachable unit
+        into minutes of timeouts instead of one.
+        """
         result: dict[str, int | None] = {}
         for i in range(0, len(addresses), MAX_BATCH):
             batch = addresses[i : i + MAX_BATCH]
@@ -173,7 +180,9 @@ class Is3Client:
             )
             if reply is None:
                 raise Is3ConnectionError(
-                    f"Reading {len(keys)} addresses was refused or unanswered"
+                    f"Reading {len(keys)} addresses was refused or unanswered "
+                    f"({batch[0]}..{batch[-1]}, batch {i // MAX_BATCH + 1} of "
+                    f"{(len(addresses) + MAX_BATCH - 1) // MAX_BATCH})"
                 )
             try:
                 values = proto.parse_values(reply, keys)

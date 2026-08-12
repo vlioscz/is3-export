@@ -159,18 +159,35 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
             export, errors = await self._async_validate(user_input)
             if not errors and export is not None:
                 unique_id, _title = unit_identity(export, user_input[CONF_HOST])
-                await self.async_set_unique_id(unique_id)
-                # Reconfiguring must stay on the same unit, not repoint the entry
-                # at a different one and shadow whatever entry already owns it.
-                self._abort_if_unique_id_mismatch(reason="wrong_unit")
+                # The identity comes out of the export's header, and the export
+                # is the very thing being replaced here -- republishing a
+                # project from IDM3 can change it while the unit on the desk
+                # stays the same one.  So a changed id is not by itself wrong.
+                #
+                # What would be wrong is landing on an id another entry already
+                # owns: that is the case this guards, repointing this entry at a
+                # unit Home Assistant is already talking to elsewhere.
+                if self._owned_by_another_entry(unique_id, entry.entry_id):
+                    return self.async_abort(reason="wrong_unit")
                 await self._async_store_upload(user_input, unique_id)
-                return self.async_update_reload_and_abort(entry, data_updates=user_input)
+                # Entity ids hang off the entry id, not off this, so adopting the
+                # new identity costs nothing that is on screen.
+                return self.async_update_reload_and_abort(
+                    entry, unique_id=unique_id, data_updates=user_input
+                )
 
         defaults = user_input if user_input is not None else dict(entry.data)
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=build_schema(defaults),
             errors=errors,
+        )
+
+    def _owned_by_another_entry(self, unique_id: str, entry_id: str) -> bool:
+        """Whether some other configured unit already answers to this identity."""
+        return any(
+            other.unique_id == unique_id and other.entry_id != entry_id
+            for other in self._async_current_entries()
         )
 
     async def async_step_reauth(

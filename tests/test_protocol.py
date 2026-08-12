@@ -213,6 +213,24 @@ def test_reads_split_into_batches() -> None:
     assert len(client._transport.sent) == 2
 
 
+def test_an_unanswered_batch_says_which_one_it_was() -> None:
+    """This is the error people paste into an issue, so it has to be worth
+    pasting: which addresses, and where in the read it happened."""
+
+    def responder(request):
+        return None  # the unit says nothing at all
+
+    client = _make_client(responder)
+    addresses = [f"0x{0x01020000 + i:08X}" for i in range(50)]
+
+    with pytest.raises(Is3ConnectionError) as raised:
+        asyncio.run(client.async_get_many(addresses))
+
+    message = str(raised.value)
+    assert "0x01020000" in message and "0x01020027" in message, message
+    assert "batch 1 of 2" in message, message
+
+
 def test_a_refused_write_raises() -> None:
     """A NACKed write is an error, not a silently dropped command."""
 
