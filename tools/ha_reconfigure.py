@@ -37,6 +37,11 @@ ARGS.add_argument(
     default="",
     help="an export file to start from; without it the unit is asked over HTTP",
 )
+ARGS.add_argument(
+    "--new-export",
+    default="",
+    help="the export to upload; without it one is made up from the current one",
+)
 OPTS = ARGS.parse_args()
 
 from homeassistant import config_entries  # noqa: E402
@@ -109,6 +114,17 @@ def republish(text: str, drop: str) -> tuple[str, str]:
         raise SystemExit(f"Could not find {drop} in the export to remove it")
     kept.append(added)
     return "\n".join(kept) + "\n", new_id
+
+
+def addresses_in(text: str) -> set[str]:
+    """Every address an export names, upper-cased for comparing."""
+    return {a.upper() for a in re.findall(r"\b0x[0-9A-Fa-f]{8}\b", text)}
+
+
+def header_id(text: str) -> str:
+    """The installation id out of an export's header line."""
+    found = re.search(r"_ID_([^_]+)", text.splitlines()[0] if text else "")
+    return found.group(1) if found else ""
 
 
 def a_droppable_address(hass, before: set[str]) -> str:
@@ -184,9 +200,17 @@ async def main() -> int:
     print(f"   {len(before)} entities, unique_id={entry.unique_id}")
 
     original_text = await load_export_text(hass)
-    dropped = a_droppable_address(hass, before)
-    new_text, new_id = republish(original_text, dropped)
-    print(f"   removing {dropped} from the export, adding 0x0102FF01")
+    if OPTS.new_export:
+        # A real pair of exports from one installation, which is worth more than
+        # anything that can be made up: it carries whatever the configuration
+        # software actually wrote, including whatever it was that would not go in.
+        new_text = Path(OPTS.new_export).read_text(encoding="utf-8-sig")
+        new_id = header_id(new_text) or entry.unique_id
+        print("   uploading the export given on the command line")
+    else:
+        dropped = a_droppable_address(hass, before)
+        new_text, new_id = republish(original_text, dropped)
+        print(f"   removing {dropped} from the export, adding 0x0102FF01")
 
     print("\n=== REPUBLISHED PROJECT, UPLOADED ===")
     result = await reconfigure(
@@ -212,10 +236,12 @@ async def main() -> int:
     after = entity_ids(hass, entry)
     added, gone = after - before, before - after
     print(f"   {len(before)} entities -> {len(after)}  (+{len(added)} -{len(gone)})")
-    check("the entity that is new in the export appeared",
-          any("reconfigure_probe" in e for e in added), f"{len(added)} appeared")
-    check("the entity that left the export went away", len(gone) == 1,
-          f"{len(gone)} disappeared")
+    check("the export brought entities with it", bool(added or gone),
+          f"{len(added)} appeared, {len(gone)} disappeared")
+    if not OPTS.new_export:
+        check("the entity that is new in the export appeared",
+              any("reconfigure_probe" in e for e in added))
+        check("the entity that left the export went away", len(gone) == 1)
 
     print("\n=== A REJECTED SUBMIT MUST NOT LOSE THE UPLOAD ===")
     # Home Assistant deletes an uploaded file the moment it is read, so a form
@@ -229,8 +255,15 @@ async def main() -> int:
     )
     # A different address, not just a different name: an entity is identified by
     # its address, so renaming one only relabels the entity that is already
-    # there and would prove nothing about which export was read.
-    second_text = new_text.replace("0x0102FF01", "0x0102FF02")
+    # there and would prove nothing about which export was read.  With a real
+    # pair of exports, going back to the first one is that same difference.
+    second_text = (
+        original_text if OPTS.new_export else new_text.replace("0x0102FF01", "0x0102FF02")
+    )
+    # Addresses the export just uploaded has and the one being submitted now
+    # does not: if any of them still has an entity afterwards, the form read the
+    # wrong file.
+    only_in_first = addresses_in(new_text) - addresses_in(second_text)
     rejected = await hass.config_entries.flow.async_configure(
         flow["flow_id"],
         base_input()
@@ -253,13 +286,15 @@ async def main() -> int:
           retried["type"] is FlowResultType.ABORT
           and retried.get("reason") == "reconfigure_successful",
           f"{retried['type']}: {retried.get('reason') or retried.get('errors')}")
-    addresses = {
+    live = {
         (hass.states.get(e).attributes.get("address") or "").upper()
         for e in entity_ids(hass, entry)
     }
+    leftover = only_in_first & live
     check("it used the export that was uploaded, not the one on disk",
-          "0X0102FF02" in addresses,
-          on_fail="fell back to the saved file: the upload was silently discarded")
+          not leftover,
+          on_fail=f"{len(leftover)} address(es) only the previous export had are "
+                  "still here: the upload was silently discarded")
 
     print("\n=== UNLOAD ===")
     ok = await hass.config_entries.async_unload(entry.entry_id)
