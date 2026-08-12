@@ -117,6 +117,9 @@ class Is3Client:
         self._keepalive_task: asyncio.Task[None] | None = None
         self._reconnect_task: asyncio.Task[None] | None = None
         self._warned_foreign = False
+        # Whether the unit turned its push stream on.  Not every one does, and
+        # it is not fatal -- it only means changes wait for the next refresh.
+        self.events_started = False
 
     # ---- public interface (mirrors Is3Client) ----------------------------
 
@@ -146,13 +149,19 @@ class Is3Client:
             raise Is3AuthError(
                 f"Authorization refused by {self.host} (wrong password?)"
             )
-        if not await self._event_start():
-            # Without the event stream the session is deaf: reads still work, so
-            # nothing looks wrong, but no wall switch would ever reach Home
-            # Assistant again.  Fail the setup instead and let HA retry.
-            await self._teardown()
-            raise Is3ConnectionError(
-                f"{self.host} did not start its event stream"
+        # A unit that will not turn on its event stream is still a perfectly
+        # good unit: reads and writes work, and the coordinator re-reads
+        # everything on its cycle anyway.  Refusing to set up over this was
+        # worse than the problem -- it took an installation that was working
+        # and made it not work at all.  So say so, loudly and once, and carry
+        # on: changes then show up within the refresh interval instead of
+        # instantly.
+        self.events_started = await self._event_start()
+        if not self.events_started:
+            _LOGGER.warning(
+                "%s did not acknowledge the event stream. Values will follow "
+                "the periodic refresh instead of arriving as they change",
+                self.host,
             )
         self._connected = True
         self._start_keepalive()
@@ -465,11 +474,10 @@ class Is3Client:
                 if not await self._authorize():
                     await self._teardown()
                     continue
-                if not await self._event_start():
-                    # A session without the push stream looks healthy and
-                    # reports nothing ever again; keep trying for a real one.
-                    await self._teardown()
-                    continue
+                # Asked for again on every reconnect: a unit that would not
+                # turn the stream on before may well now, and if it still
+                # will not, the session is worth having either way.
+                self.events_started = await self._event_start()
             except Is3ConnectionError:
                 continue
             self._connected = True

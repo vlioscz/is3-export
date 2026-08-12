@@ -70,6 +70,10 @@ def build_diagnostics(
         "capabilities": {
             "reads_supported": coordinator.reads_supported,
             "connected": coordinator.client.connected,
+            # False means this unit never acknowledged the push stream, so
+            # values follow the refresh cycle instead of arriving as they
+            # change.  Not a fault, but it explains a sluggish-looking install.
+            "events_started": getattr(coordinator.client, "events_started", None),
         },
         "header": {
             "version": header.version if header else None,

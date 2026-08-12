@@ -254,6 +254,46 @@ def test_a_silent_host_is_not_reported_as_a_wrong_password() -> None:
     assert "No answer" in str(raised.value)
 
 
+def test_a_unit_that_will_not_start_events_still_connects() -> None:
+    """Refusing to set up over this took a working installation off the air.
+
+    Reads and writes do not need the push stream, and the coordinator re-reads
+    everything on its cycle regardless, so a unit that will not turn it on is
+    still worth having -- it just reports changes a refresh later.
+    """
+
+    def responder(request):
+        if request.tis == (proto.T_EVENT, 0x02, 0x00):
+            return None  # the one thing this unit will not do
+        if request.tis == (proto.T_STARTSTOP, 0x06, 0x01):
+            return _reply(request, b"\x09" * 8)
+        return _reply(request, b"\x20")
+
+    client = _make_client(responder)
+    client._connected = False
+
+    asyncio.run(client.async_connect())
+
+    assert client.connected, "a unit without events is still a unit"
+    assert not client.events_started, "and the integration knows it is deaf"
+
+
+def test_a_unit_that_does_start_events_says_so() -> None:
+    """The flag has to mean something, or nothing can report on it."""
+
+    def responder(request):
+        if request.tis == (proto.T_STARTSTOP, 0x06, 0x01):
+            return _reply(request, b"\x09" * 8)
+        return _reply(request, b"\x20")
+
+    client = _make_client(responder)
+    client._connected = False
+
+    asyncio.run(client.async_connect())
+
+    assert client.events_started
+
+
 def test_a_unit_that_answers_but_refuses_still_blames_the_password() -> None:
     """The distinction only works if a genuine refusal still reads as one."""
 
