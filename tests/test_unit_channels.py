@@ -84,9 +84,16 @@ def test_a_silent_unit_leaves_the_decision_to_the_timer() -> None:
 # --- whether the unit wants a password --------------------------------------
 
 
-def test_password_required_is_read_from_the_user_info() -> None:
-    assert proto.parse_password_required(_packet(b"\x01")) is True
+def test_only_zero_means_the_unit_has_no_password() -> None:
+    """Everything else means "it did not say", including values seen live.
+
+    A unit certain to have no password answered 0x03.  Read as a plain yes/no
+    that told its owner to go and find a password which does not exist -- worse
+    than admitting the byte is not understood, so only zero is now trusted.
+    """
     assert proto.parse_password_required(_packet(b"\x00")) is False
+    assert proto.parse_password_required(_packet(b"\x03")) is None, "seen live"
+    assert proto.parse_password_required(_packet(b"\x01")) is None
     assert proto.parse_password_required(_packet(b"")) is None
     assert proto.parse_password_required(_packet(b"\x01", proto.ADDR_CU_NACK)) is None
 

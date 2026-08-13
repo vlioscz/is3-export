@@ -216,10 +216,19 @@ def parse_project_digest(pkt: Packet) -> bytes | None:
 
 
 def parse_password_required(pkt: Packet) -> bool | None:
-    """Whether the unit has a password set, from a GetUserInfo reply."""
+    """Whether the unit has a password set, from a GetUserInfo reply.
+
+    ``None`` means the unit did not say, and that now covers every value but
+    zero.  Reading this as a plain yes/no was wrong: a unit certain to have no
+    password answered ``0x03``, which under that reading told its owner to go
+    and find the password it does not have.  Zero has meant "no password" on
+    every unit checked; what the other values mean is not known, and guessing
+    was worse than admitting it -- the caller falls back to reporting what
+    actually happened rather than what this byte implied.
+    """
     if pkt.is_nack or not pkt.data:
         return None
-    return bool(pkt.data[0])
+    return False if pkt.data[0] == 0 else None
 
 
 @dataclass(slots=True)
