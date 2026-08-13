@@ -196,6 +196,22 @@ def main(argv: list[str] | None = None) -> int:
     state = {0x20: "FastRun", 0x10: "Run", 0x00: "Stop"}.get(data[0], hex(data[0]))
     print(f"  unit answers.  run state: {state}")
 
+    # The three replies that come back before anything has to be authorized,
+    # printed raw.  Nothing here is decoded on purpose: what they mean is not
+    # known, and the reason to have them is to lay two units side by side --
+    # one that works and one that does not -- and see where they differ.  Two
+    # units of the same model on different firmware is exactly that comparison.
+    print("  what it says about itself, undecoded:")
+    print(f"     run state     {data.hex()}")
+    for label, typ, i1, i2, body in (
+        ("unit info    ", 0x70, 0x03, 0x02, bytes.fromhex("000000000000000002")),
+        ("protocol info", 0x40, 0x05, 0x00, b""),
+    ):
+        answer = probe.ask(typ, i1, i2, body, retries=2)
+        print(f"     {label} {answer[1].hex() if answer else 'no answer'}")
+    print("     (these may carry the unit's own id -- worth a look before")
+    print("      pasting them anywhere public)")
+
     probe.close()
 
     # The handshake, run twice with one difference: whether anything is asked
@@ -210,9 +226,15 @@ def main(argv: list[str] | None = None) -> int:
         attempt.ask(0x40, 0x03, 0x00)
         if interrupt:
             asked = attempt.ask(0x40, 0x06, 0x00)
+            # Printed as the byte it is, not as an answer.  On one unit whose
+            # owner is certain no password is set, this came back non-zero --
+            # so either it means something else, or it means something else on
+            # that firmware, and reporting "password set: yes" for it was the
+            # script putting words in the unit's mouth.
             answer = (
                 "no answer" if asked is None
-                else f"password set: {'yes' if asked[1] and asked[1][0] else 'no'}"
+                else f"replied {asked[1].hex() or 'empty'}"
+                     f"{'  (0 = no password on the units we know)' if asked[1] else ''}"
             )
             print(f"  asking whether a password is set -> {answer}")
         attempt.ask(0x70, 0x03, 0x02, bytes.fromhex("000000000000000002"))
@@ -255,15 +277,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     _, data = reply
     if len(data) < 5:
-        # A reply with nothing in it is not an open data plane.  The unit hands
-        # out a session token whatever password it was given and only then
-        # decides whether to answer, so this is what a password it did not want
-        # looks like from here -- and printing "OPEN" for it said the opposite
-        # of the truth on a unit that does have one set.
-        print(f"  data plane answered with no value in it ({len(data)} bytes).")
-        print("  The unit issues a token for any password and only afterwards")
-        print("  decides whether to answer, so this is what the wrong one looks")
-        print("  like. Pass --password to try the one set on the unit.")
+        # An answer with no value in it, which has at least two causes and this
+        # cannot tell them apart: the address may simply not be in that unit's
+        # project (the default one is a guess -- the first relay of a typical
+        # installation), or the data plane may not really be open, since the
+        # unit issues a session token for any password and only afterwards
+        # decides whether to answer.  Saying which would be guessing; earlier
+        # versions of this script guessed both ways and were wrong both times.
+        print(f"  the read was answered, but with no value in it ({len(data)} bytes).")
+        print(f"  Either {address:#010x} is not in this unit's project -- it is a")
+        print("  guess unless you passed --read -- or the data plane is not")
+        print("  really open, which is what a password the unit did not want")
+        print("  looks like. Try --read with an address from its export, and")
+        print("  --password if one is set.")
         probe.close()
         return 1
     raw = struct.unpack(">i", data[1:5])[0]
