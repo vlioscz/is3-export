@@ -122,6 +122,45 @@ class Probe:
         self.sock.close()
 
 
+def scan(new_probe, password: str) -> None:
+    """Ask every request this protocol uses, each on a socket of its own.
+
+    Run when the handshake will not complete, and the point is the *pattern*:
+    a unit answering some requests and not others is refusing to hold the
+    conversation, which is a different fault from being unreachable or from
+    rejecting a password -- the two things the integration can otherwise
+    report.  Each gets its own socket so nothing carries over from the last.
+
+    Two attempts rather than four: with several requests to get through and a
+    silent one costing the timeout every time, this is a survey, not a verdict.
+    """
+    body = b"\x01" + hashlib.sha1(password.encode()).digest()
+    requests = (
+        ("run state", 0x40, 0x03, 0x00, b""),
+        ("protocol info", 0x40, 0x05, 0x00, b""),
+        ("unit info", 0x70, 0x03, 0x02, bytes.fromhex("000000000000000002")),
+        ("is a password set", 0x40, 0x06, 0x00, b""),
+        ("authorize", 0x40, 0x06, 0x01, body),
+        ("project digest", 0x01, 0x03, 0x00, b""),
+        # Deliberately unauthorized: on a working unit this is ignored, and
+        # what matters is whether it is ignored the same way as the rest.
+        ("read one address, unauthorized", 0x01, 0x01, 0x00,
+         b"\x01" + struct.pack(">I", 0x01020001)),
+    )
+
+    for label, typ, i1, i2, data in requests:
+        attempt = new_probe()
+        reply = attempt.ask(typ, i1, i2, data, retries=2)
+        if reply is None:
+            answer = f"silent ({attempt.attempts} tries)"
+        elif reply[0] & 0x80:
+            answer = "refused (NACK)"
+        else:
+            answer = f"answered, {len(reply[1])} bytes"
+        print(f"     {typ:#04x}/{i1:#04x}/{i2:#04x}  {label:<32} {answer}")
+        attempt.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("host")
@@ -197,7 +236,12 @@ def main(argv: list[str] | None = None) -> int:
         attempt.close()
 
     if probe is None:
-        print("  no handshake got through -- see above for which way each failed")
+        print("  no handshake got through; asking each request on its own:")
+        scan(new_probe, args.password)
+        print("\n  A unit that answers some requests and not others is not")
+        print("  unreachable and has not lost its password -- it is refusing to")
+        print("  hold the conversation. What it will and will not answer is the")
+        print("  thing to compare against a unit that works.")
         return 1
 
     # The data plane is the real test: a unit issues a token and then ignores
