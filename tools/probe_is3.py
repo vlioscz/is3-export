@@ -122,6 +122,42 @@ class Probe:
         self.sock.close()
 
 
+def sweep(probe) -> list[tuple[int, int]]:
+    """Read a spread of low addresses at once, and report the ones with values.
+
+    For a unit whose export is not to hand -- one this integration does not
+    manage at all, say.  Without it, an empty reply cannot be told apart from
+    an address that is simply not in that unit's project, and the difference is
+    whether the data plane is open.  One address answering settles it.
+
+    The ranges are where every installation has something: the first relays,
+    the first temperatures, the first inputs.  It is one datagram.
+    """
+    keys = (
+        [0x01020001 + i for i in range(8)]
+        + [0x01050001 + i for i in range(6)]
+        + [0x01010001 + i for i in range(6)]
+    )
+    body = bytes((len(keys),)) + b"".join(struct.pack(">I", k) for k in keys)
+    print(f"  trying {len(keys)} addresses every installation has:")
+
+    reply = probe.ask(0x01, 0x01, 0x00, body, auth=True, retries=2)
+    if reply is None or len(reply[1]) < 1 + 4 * len(keys):
+        got = 0 if reply is None else len(reply[1])
+        print(f"     no usable answer ({got} bytes)")
+        return []
+
+    data = reply[1]
+    found = []
+    for index, key in enumerate(keys):
+        raw = struct.unpack(">i", data[1 + 4 * index : 5 + 4 * index])[0]
+        if (raw & 0xFFFFFFFF) < NO_VALUE:
+            found.append((key, raw))
+    for key, value in found[:10]:
+        print(f"     {key:#010x} -> {value}")
+    return found
+
+
 def scan(new_probe, password: str) -> None:
     """Ask every request this protocol uses, each on a socket of its own.
 
@@ -268,7 +304,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # The data plane is the real test: a unit issues a token and then ignores
     # requests for values when the password was not the one it wanted.
-    address = int(args.read, 16) if args.read else 0x01020001
+    try:
+        address = int(args.read, 16) if args.read else 0x01020001
+    except ValueError:
+        print(f"  --read wants an address like 0x01020001, not {args.read!r}")
+        probe.close()
+        return 2
     reply = probe.ask(0x01, 0x01, 0x00, b"\x01" + struct.pack(">I", address), auth=True)
     if reply is None:
         print("  data plane SILENT -- authorized, but the unit answers no reads.")
@@ -285,13 +326,20 @@ def main(argv: list[str] | None = None) -> int:
         # decides whether to answer.  Saying which would be guessing; earlier
         # versions of this script guessed both ways and were wrong both times.
         print(f"  the read was answered, but with no value in it ({len(data)} bytes).")
-        print(f"  Either {address:#010x} is not in this unit's project -- it is a")
-        print("  guess unless you passed --read -- or the data plane is not")
-        print("  really open, which is what a password the unit did not want")
-        print("  looks like. Try --read with an address from its export, and")
-        print("  --password if one is set.")
+        print(f"  Either {address:#010x} is not in this unit's project, or the")
+        print("  data plane is not really open -- which is what a password the")
+        print("  unit did not want looks like, since a token is handed out for")
+        print("  any password and only then does it decide whether to answer.")
+        found = sweep(probe)
+        if found:
+            print(f"  ...but {len(found)} of the addresses tried DO have values,")
+            print("  so the data plane is open and the address above was simply")
+            print("  not in this project.")
+        else:
+            print("  Nothing in the usual ranges answered either, so the data")
+            print("  plane is not open. Pass --password if one is set.")
         probe.close()
-        return 1
+        return 0 if found else 1
     raw = struct.unpack(">i", data[1:5])[0]
     shown = "no value" if (raw & 0xFFFFFFFF) >= NO_VALUE else raw
     print(f"  read {address:#010x} -> {shown}")
