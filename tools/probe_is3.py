@@ -254,10 +254,21 @@ def main(argv: list[str] | None = None) -> int:
         probe.close()
         return 1
     _, data = reply
-    if len(data) >= 5:
-        raw = struct.unpack(">i", data[1:5])[0]
-        shown = "no value" if (raw & 0xFFFFFFFF) >= NO_VALUE else raw
-        print(f"  read {address:#010x} -> {shown}")
+    if len(data) < 5:
+        # A reply with nothing in it is not an open data plane.  The unit hands
+        # out a session token whatever password it was given and only then
+        # decides whether to answer, so this is what a password it did not want
+        # looks like from here -- and printing "OPEN" for it said the opposite
+        # of the truth on a unit that does have one set.
+        print(f"  data plane answered with no value in it ({len(data)} bytes).")
+        print("  The unit issues a token for any password and only afterwards")
+        print("  decides whether to answer, so this is what the wrong one looks")
+        print("  like. Pass --password to try the one set on the unit.")
+        probe.close()
+        return 1
+    raw = struct.unpack(">i", data[1:5])[0]
+    shown = "no value" if (raw & 0xFFFFFFFF) >= NO_VALUE else raw
+    print(f"  read {address:#010x} -> {shown}")
     print("  data plane OPEN")
 
     # Whether the unit turns its push stream on, and if not, which way it
