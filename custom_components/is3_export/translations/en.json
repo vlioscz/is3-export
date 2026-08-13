@@ -69,9 +69,9 @@
       "unit_status": {
         "name": "Unit status",
         "state": {
-          "stopped": "Stopped",
-          "running": "Running",
-          "running_fast": "Running (fast)",
+          "stopped": "Stop",
+          "running": "Run",
+          "running_fast": "FastRun",
           "unknown": "Unknown"
         }
       }

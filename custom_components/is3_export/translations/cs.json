@@ -69,9 +69,9 @@
       "unit_status": {
         "name": "Stav jednotky",
         "state": {
-          "stopped": "Zastavená",
-          "running": "Běží",
-          "running_fast": "Běží (rychlý režim)",
+          "stopped": "Stop",
+          "running": "Run",
+          "running_fast": "FastRun",
           "unknown": "Neznámý"
         }
       }

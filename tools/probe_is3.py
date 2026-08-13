@@ -77,30 +77,45 @@ def build(typ, i1, i2, data=b"", token=b"\x00" * 8, pid=0) -> bytes:
 class Probe:
     """One UDP conversation with the unit."""
 
-    def __init__(self, host: str, port: int, password: str, timeout: float) -> None:
+    def __init__(
+        self, host: str, port: int, password: str, timeout: float, retries: int = 4
+    ) -> None:
         self.host, self.port, self.password, self.timeout = host, port, password, timeout
+        self.retries = retries
+        self.attempts = 0
         self.token = b"\x00" * 8
         self.pid = 0
         family = socket.AF_INET6 if ":" in host else socket.AF_INET
         self.sock = socket.socket(family, socket.SOCK_DGRAM)
         self.sock.settimeout(timeout)
 
-    def ask(self, typ, i1, i2, data=b"", auth=False):
-        """Send one request and wait for the matching reply."""
-        self.pid += 2
-        token = self.token if auth else b"\x00" * 8
-        self.sock.sendto(build(typ, i1, i2, data, token, self.pid), (self.host, self.port))
-        deadline = time.time() + self.timeout
-        while time.time() < deadline:
-            try:
-                raw, _ = self.sock.recvfrom(4096)
-            except socket.timeout:
-                return None
-            if len(raw) < HEADER_LEN + 2 or raw[:8] != PROTOCOL_VERSION:
-                continue
-            if (raw[79], raw[80], raw[81]) != (typ, i1, i2):
-                continue  # an event or a straggler; keep waiting
-            return raw[78], raw[82:-2]
+    def ask(self, typ, i1, i2, data=b"", auth=False, retries=None):
+        """Send one request and wait for its reply, resending if none comes.
+
+        Resent as many times as the integration does, and for the same reason:
+        this is UDP, a datagram can simply be dropped, and a unit that answers
+        the second time is a different animal from one that never answers at
+        all.  Asking once and reporting silence made those two look identical,
+        which cost an evening.  ``self.attempts`` records how many it took.
+        """
+        for attempt in range(1, (retries or self.retries) + 1):
+            self.attempts = attempt
+            self.pid += 2
+            token = self.token if auth else b"\x00" * 8
+            self.sock.sendto(
+                build(typ, i1, i2, data, token, self.pid), (self.host, self.port)
+            )
+            deadline = time.time() + self.timeout
+            while time.time() < deadline:
+                try:
+                    raw, _ = self.sock.recvfrom(4096)
+                except socket.timeout:
+                    break
+                if len(raw) < HEADER_LEN + 2 or raw[:8] != PROTOCOL_VERSION:
+                    continue
+                if (raw[79], raw[80], raw[81]) != (typ, i1, i2):
+                    continue  # an event or a straggler; keep waiting
+                return raw[78], raw[82:-2]
         return None
 
     def close(self) -> None:
@@ -113,6 +128,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=9999)
     parser.add_argument("--password", default="")
     parser.add_argument("--timeout", type=float, default=3.0)
+    parser.add_argument(
+        "--retries", type=int, default=4,
+        help="resends per request, matching what the integration does",
+    )
     parser.add_argument("--read", metavar="ADDRESS", help="also read this address")
     parser.add_argument("--listen", type=float, default=5.0, metavar="SECONDS")
     parser.add_argument(
@@ -121,8 +140,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    probe = Probe(args.host, args.port, args.password, args.timeout)
-    print(f"probing {args.host}:{args.port} (UDP)")
+    def new_probe():
+        return Probe(
+            args.host, args.port, args.password, args.timeout, args.retries
+        )
+
+    probe = new_probe()
+    print(f"probing {args.host}:{args.port} (UDP), up to {args.retries} tries per request")
 
     reply = probe.ask(0x40, 0x03, 0x00)
     if reply is None:
@@ -143,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     # attempt gets a socket of its own, so neither can be blamed on the other.
     probe = None
     for label, interrupt in (("uninterrupted", False), ("with a question first", True)):
-        attempt = Probe(args.host, args.port, args.password, args.timeout)
+        attempt = new_probe()
         attempt.ask(0x40, 0x03, 0x00)
         if interrupt:
             asked = attempt.ask(0x40, 0x06, 0x00)
@@ -156,15 +180,16 @@ def main(argv: list[str] | None = None) -> int:
         attempt.ask(0x40, 0x05, 0x00)
         body = b"\x01" + hashlib.sha1(args.password.encode()).digest()
         reply = attempt.ask(0x40, 0x06, 0x01, body)
+        tries = f" (after {attempt.attempts} tries)" if attempt.attempts > 1 else ""
 
         if reply is None:
-            print(f"  handshake {label}: authorization NOT ANSWERED")
+            print(f"  handshake {label}: authorization NOT ANSWERED after {attempt.attempts} tries")
         elif reply[0] & 0x80:
-            print(f"  handshake {label}: authorization REFUSED (NACK)")
+            print(f"  handshake {label}: authorization REFUSED (NACK){tries}")
         elif len(reply[1]) < 8:
             print(f"  handshake {label}: authorization answered without a token")
         else:
-            print(f"  handshake {label}: AUTHORIZED")
+            print(f"  handshake {label}: AUTHORIZED{tries}")
             if probe is None:
                 attempt.token = reply[1][:8]
                 probe = attempt
