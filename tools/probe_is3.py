@@ -133,20 +133,47 @@ def main(argv: list[str] | None = None) -> int:
     state = {0x20: "FastRun", 0x10: "Run", 0x00: "Stop"}.get(data[0], hex(data[0]))
     print(f"  unit answers.  run state: {state}")
 
-    reply = probe.ask(0x40, 0x06, 0x00)
-    if reply is not None and reply[1]:
-        print(f"  password set on the unit: {'yes' if reply[1][0] else 'no'}")
+    probe.close()
 
-    probe.ask(0x70, 0x03, 0x02, bytes.fromhex("000000000000000002"))
-    probe.ask(0x40, 0x05, 0x00)
-    body = b"\x01" + hashlib.sha1(args.password.encode()).digest()
-    reply = probe.ask(0x40, 0x06, 0x01, body)
-    if reply is None or reply[0] & 0x80 or len(reply[1]) < 8:
-        print("  authorization REFUSED -- wrong password")
-        probe.close()
+    # The handshake, run twice with one difference: whether anything is asked
+    # in between its steps.  On one installation authorizing began to fail the
+    # moment a harmless extra question was put in front of it, and it works
+    # again with that question removed -- which would mean the unit tracks
+    # where it is in the handshake and anything unexpected loses it.  Each
+    # attempt gets a socket of its own, so neither can be blamed on the other.
+    probe = None
+    for label, interrupt in (("uninterrupted", False), ("with a question first", True)):
+        attempt = Probe(args.host, args.port, args.password, args.timeout)
+        attempt.ask(0x40, 0x03, 0x00)
+        if interrupt:
+            asked = attempt.ask(0x40, 0x06, 0x00)
+            answer = (
+                "no answer" if asked is None
+                else f"password set: {'yes' if asked[1] and asked[1][0] else 'no'}"
+            )
+            print(f"  asking whether a password is set -> {answer}")
+        attempt.ask(0x70, 0x03, 0x02, bytes.fromhex("000000000000000002"))
+        attempt.ask(0x40, 0x05, 0x00)
+        body = b"\x01" + hashlib.sha1(args.password.encode()).digest()
+        reply = attempt.ask(0x40, 0x06, 0x01, body)
+
+        if reply is None:
+            print(f"  handshake {label}: authorization NOT ANSWERED")
+        elif reply[0] & 0x80:
+            print(f"  handshake {label}: authorization REFUSED (NACK)")
+        elif len(reply[1]) < 8:
+            print(f"  handshake {label}: authorization answered without a token")
+        else:
+            print(f"  handshake {label}: AUTHORIZED")
+            if probe is None:
+                attempt.token = reply[1][:8]
+                probe = attempt
+                continue
+        attempt.close()
+
+    if probe is None:
+        print("  no handshake got through -- see above for which way each failed")
         return 1
-    probe.token = reply[1][:8]
-    print("  authorized")
 
     # The data plane is the real test: a unit issues a token and then ignores
     # requests for values when the password was not the one it wanted.
