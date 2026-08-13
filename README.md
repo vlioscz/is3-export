@@ -324,6 +324,26 @@ Temperatures and humidities come in **multiplied by a hundred** — 2550 means
 what it means is up to the program that uses it. **Counters** (`0x0206`) report
 the unit's real totals.
 
+### Utility meters
+
+A meter's pulse must be **counted in the central unit**, not in Home Assistant.
+Add a counter over the pulse input in IDM3; it then comes through here as a
+`sensor` (a `0x0206` total), and if you give it a `kWh`, `m³` or similar unit it
+is tagged `energy` / `water` / `gas`, ready for the Energy dashboard.
+
+Do **not** count the pulses in Home Assistant. A meter's pulse is a brief,
+frequent contact and arrives as a `binary_sensor` input (e.g. `Pulz_meter`);
+Home Assistant reads state on a cycle and cannot see each short edge, so a
+counter built over the input undercounts badly. The unit counts in firmware and
+never misses one — which is why the integration exposes the raw input but leaves
+the counting to the unit.
+
+Everything above the counter is per-installation and belongs in Home Assistant,
+not here: dividing the count by the meter's imp/kWh (a template sensor), the
+two-tariff split (a `utility_meter` switched by your HDO signal), and the Energy
+dashboard. Setups vary — two pulse outputs for the two tariffs, or one pulse
+plus an HDO contact for low tariff — so there is no single rule to build in.
+
 ## ⚠️ Security
 
 **The unit's authorization is not a real barrier.** It accepts an **empty

@@ -268,6 +268,41 @@ def is_counter(entry: Is3Entry) -> bool:
     return _class_of(entry) in COUNTER
 
 
+# Name tokens that mark a digital input as a utility meter's pulse output.
+# ``pulz``/``pulse`` are the strong ones; the meter nouns catch an input named
+# only for the meter.  Matched as substrings, but only ever on a digital input,
+# so a relay named for a meter cannot trip them.
+_METER_PULSE_TOKENS = ("pulz", "pulse", "elektromer", "vodomer", "plynomer")
+
+
+def is_meter_pulse_input(entry: Is3Entry) -> bool:
+    """Whether a digital input looks like a utility meter's pulse output.
+
+    A meter emits a brief contact per unit consumed; wired to an input it reads
+    as a ``binary_sensor``.  It must be **counted in the central unit** (as a
+    ``0x0206`` counter), never by counting the input's edges in Home Assistant,
+    which cannot see each short pulse.  This spots the input so setup can point
+    that out -- it is a naming heuristic, so it stays on inputs and off buttons.
+    """
+    if not is_binary(entry) or is_press_button(entry):
+        return False
+    haystack = f"{entry.name} {entry.hw_id or ''}".lower()
+    return any(token in haystack for token in _METER_PULSE_TOKENS)
+
+
+def uncounted_meter_pulses(export: "Is3Export") -> list[str]:
+    """Names of meter-pulse inputs when the export holds no counter at all.
+
+    The mistake this guards against -- counting a meter's pulses in Home
+    Assistant instead of in the unit -- is only worth mentioning when the unit
+    is not already counting.  A counter anywhere in the export means the
+    installer knows the pattern, so nothing is said.
+    """
+    if any(is_counter(entry) for entry in export.entries):
+        return []
+    return [entry.name for entry in export.entries if is_meter_pulse_input(entry)]
+
+
 def is_illuminance(entry: Is3Entry) -> bool:
     """Whether the entry is a light-intensity (lux) input.
 

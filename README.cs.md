@@ -330,6 +330,25 @@ jsou rovnou v procentech. `SYSTEMINTEGER` je **syrová hodnota**; co znamená,
 určuje program, který ji používá. **Počítadla** (`0x0206`) hlásí skutečné stavy
 jednotky.
 
+### Měřiče spotřeby
+
+Pulz měřiče se musí **počítat v centrální jednotce**, ne v Home Assistantu.
+V IDM3 nad pulzním vstupem přidejte počítadlo; to sem pak přijde jako `sensor`
+(`0x0206`, celkový stav), a když mu dáte jednotku `kWh`, `m³` a podobně, dostane
+třídu `energy` / `water` / `gas` a je připravené do Energy dashboardu.
+
+Pulzy **nepočítejte** v Home Assistantu. Pulz měřiče je krátký a častý kontakt,
+který přichází jako vstup `binary_sensor` (třeba `Pulz_meter`); Home Assistant
+čte stav v cyklu a každý krátký zákmit nezachytí, takže počítadlo postavené nad
+tím vstupem výrazně podpočítá. Jednotka počítá ve firmwaru a nemine ani jeden —
+proto integrace ten syrový vstup vystaví, ale počítání nechává na jednotce.
+
+Cokoliv nad počítadlem je věc dané instalace a patří do Home Assistantu, ne sem:
+dělení počtu konstantou měřiče (imp/kWh) přes šablonový senzor, rozdělení na dva
+tarify (`utility_meter` přepínaný signálem HDO) i samotný Energy dashboard.
+Zapojení se liší — dva pulzní výstupy pro dva tarify, nebo jeden pulz a kontakt
+HDO pro nízký tarif — takže žádné jedno pravidlo se do integrace zabudovat nedá.
+
 ## ⚠️ Bezpečnost
 
 **Autorizace jednotky není skutečná překážka.** Ve výchozím stavu přijme

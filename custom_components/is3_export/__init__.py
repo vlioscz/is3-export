@@ -20,7 +20,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .client import Is3Client
 from .errors import Is3AuthError, Is3ConnectionError
-from .export import Is3Export, expected_entities
+from .export import Is3Export, expected_entities, uncounted_meter_pulses
 from .const import (
     CONF_DELIMITER,
     CONF_EXPORT_FILE,
@@ -154,6 +154,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: Is3ConfigEntry) -> bool:
 
     entry.runtime_data = coordinator
     _register_unit_device(hass, entry)
+    if pulses := uncounted_meter_pulses(coordinator.data.export):
+        # Said once at setup, not as a repair card: it is a naming heuristic and
+        # the conversion may already be handled in Home Assistant, so it must not
+        # nag -- only point someone who goes looking in the right direction.
+        _LOGGER.info(
+            "%s looks like a utility-meter pulse input and the export has no "
+            "counter. Count the meter in the central unit as a counter -- Home "
+            "Assistant cannot catch the pulses reliably. See the README section "
+            "'Utility meters'",
+            ", ".join(pulses),
+        )
     _prune_orphan_entities(hass, entry, coordinator.data.export)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
