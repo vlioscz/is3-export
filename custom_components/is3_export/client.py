@@ -149,7 +149,19 @@ class Is3Client:
                 f"No answer from {self.host}:{self.port}"
             )
 
-        if not await self._authorize():
+        outcome = await self._authorize()
+        if outcome == "silent":
+            # It answered the question before this one, so it is there and the
+            # network is fine.  A unit that then goes quiet is not refusing a
+            # password -- it is not holding the conversation, which is what one
+            # left half-started after a project was written looks like.
+            await self._teardown()
+            raise Is3ConnectionError(
+                f"{self.host} answered the first request but never the one that "
+                f"signs in. The unit is reachable but is not completing the "
+                f"connection: it may still be starting up, or need restarting"
+            )
+        if outcome != "ok":
             await self._teardown()
             raise Is3AuthError(
                 f"Authorization refused by {self.host} (wrong password?)"
@@ -274,8 +286,16 @@ class Is3Client:
         except (OSError, asyncio.TimeoutError) as err:
             raise Is3ConnectionError(f"Cannot reach {self.host}:{self.port}") from err
 
-    async def _authorize(self) -> bool:
+    async def _authorize(self) -> str:
         """Run the connect handshake and store the session token.
+
+        Returns ``"ok"``, ``"refused"`` or ``"silent"``, and the last two are
+        not the same thing.  A refusal is the unit saying no, which for this
+        request means the password.  Silence is the unit not answering a
+        question it answers when it is well -- seen on a unit that replied to
+        "what state are you in" and to nothing else, having been left in some
+        half-started state.  Reporting that as a refused password sent a whole
+        evening looking for a password that did not exist.
 
         The old token is deliberately **not** cleared first.  Every handshake
         send below passes ``auth=False`` and so carries an explicit zero token
@@ -296,11 +316,13 @@ class Is3Client:
             proto.authorization_data(self._password, self._user),
             auth=False,
         )
-        token = proto.parse_token(reply) if reply is not None else None
+        if reply is None:
+            return "silent"
+        token = proto.parse_token(reply)
         if token is None:
-            return False
+            return "refused"
         self._token = token
-        return True
+        return "ok"
 
     async def _event_start(self) -> bool:
         """Turn on the push stream; False if the unit did not acknowledge.
@@ -362,7 +384,7 @@ class Is3Client:
             return reply
         if self._closing:
             return None
-        if await self._authorize():
+        if await self._authorize() == "ok":
             retry = await self._send_once(typ, i1, i2, data, auth=True)
             return retry if retry is not None and retry.is_ack else None
         self._handle_disconnect()
@@ -496,7 +518,7 @@ class Is3Client:
                 return
             try:
                 await self._open()
-                if not await self._authorize():
+                if await self._authorize() != "ok":
                     await self._teardown()
                     continue
                 # Asked for again on every reconnect: a unit that would not

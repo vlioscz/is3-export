@@ -369,3 +369,65 @@ def _event_packet(data: bytes) -> bytes:
         + data
     )
     return body + crc.crc_bytes(body)
+
+
+def _ack(data: bytes = b"") -> proto.Packet:
+    """An acknowledged reply carrying ``data``."""
+    return proto.Packet(
+        b"", 0, 0, proto.ADDR_CU_ACK, proto.T_STARTSTOP, 0x06, 0x01, data, True
+    )
+
+
+def _nack() -> proto.Packet:
+    """The unit saying no."""
+    return proto.Packet(
+        b"", 0, 0, proto.ADDR_CU_NACK, proto.T_STARTSTOP, 0x06, 0x01, b"", True
+    )
+
+
+def test_a_unit_that_says_nothing_is_not_a_refused_password() -> None:
+    """Silence and a refusal are different faults with different answers.
+
+    A unit that answered the request before this one is reachable and on the
+    network.  If it then never answers the one that signs in, nothing is wrong
+    with the password -- it is not completing the connection, which is what one
+    left half-started looks like.  Calling that a bad password sent an evening
+    looking for a password that did not exist.
+    """
+    client = Is3Client("192.168.1.10", 9999, "")
+    sent: list[tuple[int, int, int]] = []
+
+    async def _reply(typ, i1, i2, data=b"", *, auth=True, retries=None):
+        sent.append((typ, i1, i2))
+        # Everything answers except the authorization, exactly as the unit did.
+        return None if (typ, i1, i2) == (proto.T_STARTSTOP, 0x06, 0x01) else _ack()
+
+    client._send_once = _reply  # type: ignore[method-assign]
+
+    assert asyncio.run(client._authorize()) == "silent"
+    assert (proto.T_STARTSTOP, 0x06, 0x01) in sent
+
+
+def test_a_refusal_is_still_a_refusal() -> None:
+    """A NACK, or a reply with no token in it, is the unit saying no."""
+    client = Is3Client("192.168.1.10", 9999, "")
+
+    async def _refuse(typ, i1, i2, data=b"", *, auth=True, retries=None):
+        return _nack() if (typ, i1, i2) == (proto.T_STARTSTOP, 0x06, 0x01) else _ack()
+
+    client._send_once = _refuse  # type: ignore[method-assign]
+
+    assert asyncio.run(client._authorize()) == "refused"
+
+
+def test_a_good_handshake_stores_the_token() -> None:
+    client = Is3Client("192.168.1.10", 9999, "")
+    token = bytes(range(8))
+
+    async def _authorize(typ, i1, i2, data=b"", *, auth=True, retries=None):
+        return _ack(token) if (typ, i1, i2) == (proto.T_STARTSTOP, 0x06, 0x01) else _ack()
+
+    client._send_once = _authorize  # type: ignore[method-assign]
+
+    assert asyncio.run(client._authorize()) == "ok"
+    assert client._token == token
