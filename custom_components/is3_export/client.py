@@ -125,6 +125,10 @@ class Is3Client:
         # it is not fatal -- it only means changes wait for the next refresh.
         self.events_started = False
         self._events_refused = False
+        # The unit's own description, captured raw at connect: run state, unit
+        # info, protocol info.  A firmware fingerprint for the diagnostics; see
+        # _authorize.  Empty until the first handshake.
+        self.fingerprint: dict[str, str | None] = {}
 
     # ---- public interface (mirrors Is3Client) ----------------------------
 
@@ -306,9 +310,21 @@ class Is3Client:
         exactly the same way, and if it turns out to still be good, that caller
         simply succeeds.
         """
-        await self._send_once(proto.T_STARTSTOP, 0x03, 0x00, auth=False)  # GetState
-        await self._send_once(proto.T_UNITINFO, 0x03, 0x02, proto.UNIT_INFO_DATA, auth=False)
-        await self._send_once(proto.T_STARTSTOP, 0x05, 0x00, auth=False)  # ProtocolInfo
+        # The three replies before authorization are the unit describing
+        # itself, and they come back whether or not the sign-in will.  Kept raw
+        # as a firmware fingerprint: protocol-info differs by firmware (its
+        # length most visibly), and the run state's first byte is the run mode.
+        # Captured here so a bug report carries what otherwise needs the probe.
+        state = await self._send_once(proto.T_STARTSTOP, 0x03, 0x00, auth=False)
+        info = await self._send_once(
+            proto.T_UNITINFO, 0x03, 0x02, proto.UNIT_INFO_DATA, auth=False
+        )
+        protocol_info = await self._send_once(proto.T_STARTSTOP, 0x05, 0x00, auth=False)
+        self.fingerprint = {
+            "run_state": state.data.hex() if state else None,
+            "unit_info": info.data.hex() if info else None,
+            "protocol_info": protocol_info.data.hex() if protocol_info else None,
+        }
         reply = await self._send_once(
             proto.T_STARTSTOP,
             0x06,

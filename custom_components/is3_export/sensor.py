@@ -170,6 +170,11 @@ class Is3UnitStatusSensor(CoordinatorEntity[Is3Coordinator], SensorEntity):
         state = self.coordinator.unit_state
         if state is not None and state.clock is not None:
             attributes["unit_clock"] = state.clock
+        # The raw run-state byte, so a value the enum above cannot name (a unit
+        # left half-started reports one) is still something to point at.
+        raw = getattr(self.coordinator.client, "fingerprint", {}).get("run_state")
+        if raw:
+            attributes["run_state_byte"] = f"0x{raw[:2]}"
         return attributes
 
 

@@ -80,6 +80,7 @@ def build_diagnostics(
             # healthy link does, and it is the one fault that hides completely.
             "corrupt_datagrams": getattr(coordinator.client, "corrupt_datagrams", None),
         },
+        "firmware": _firmware_fingerprint(getattr(coordinator.client, "fingerprint", {})),
         "header": {
             "version": header.version if header else None,
             "created": header.created if header else None,
@@ -93,6 +94,26 @@ def build_diagnostics(
             "by_platform": dict(sorted(platforms.items())),
         },
         "entries": [_entry_diagnostics(e, values) for e in export.entries],
+    }
+
+
+def _firmware_fingerprint(fingerprint: dict[str, str | None]) -> dict[str, Any]:
+    """A shareable view of what the unit says about itself before authorizing.
+
+    Undecoded on purpose: the point is to lay two units side by side -- one that
+    works and one that does not -- and see where they differ.  ``protocol_info``
+    differs by firmware, most visibly in its length, and carries no id;
+    ``run_state``'s first byte is the run mode (a value like ``0x30`` that the
+    status sensor cannot name is exactly what this exposes).  ``unit_info`` may
+    carry the unit's own id, so only its length is kept here -- its raw bytes
+    stay in the probe, which the maintainer runs against their own unit.
+    """
+    run_state = fingerprint.get("run_state")
+    unit_info = fingerprint.get("unit_info")
+    return {
+        "run_state_byte": f"0x{run_state[:2]}" if run_state else None,
+        "protocol_info": fingerprint.get("protocol_info"),
+        "unit_info_len": len(unit_info) // 2 if unit_info else None,
     }
 
 

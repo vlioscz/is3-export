@@ -431,3 +431,26 @@ def test_a_good_handshake_stores_the_token() -> None:
 
     assert asyncio.run(client._authorize()) == "ok"
     assert client._token == token
+
+
+def test_the_handshake_captures_a_firmware_fingerprint() -> None:
+    """The three replies before authorization are kept raw, for diagnostics."""
+    client = Is3Client("192.168.1.10", 9999, "")
+
+    async def _describe(typ, i1, i2, data=b"", *, auth=True, retries=None):
+        bodies = {
+            (proto.T_STARTSTOP, 0x03, 0x00): b"\x20\x46",   # run state
+            (proto.T_UNITINFO, 0x03, 0x02): b"\x00\x00\xf0\x08",  # unit info
+            (proto.T_STARTSTOP, 0x05, 0x00): b"\x00\x02\x97",  # protocol info
+        }
+        return _ack(bodies.get((typ, i1, i2), b"\x00" * 8))
+
+    client._send_once = _describe  # type: ignore[method-assign]
+
+    asyncio.run(client._authorize())
+
+    assert client.fingerprint == {
+        "run_state": "2046",
+        "unit_info": "0000f008",
+        "protocol_info": "000297",
+    }

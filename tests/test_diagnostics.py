@@ -32,6 +32,11 @@ def _coordinator(export, values):
             delimiter=" ",
             events_started=True,
             corrupt_datagrams=0,
+            fingerprint={
+                "run_state": "20460200",
+                "unit_info": "0000f00100000000ffffffff00000000",
+                "protocol_info": "19c80200010000030102",
+            },
         ),
     )
 
@@ -95,3 +100,31 @@ def test_keeps_the_functional_payload_for_support() -> None:
     # capabilities and the version header are preserved
     assert diag["capabilities"]["reads_supported"] is True
     assert diag["header"]["idm3"] == "03-03-34"
+
+
+def test_firmware_fingerprint_is_shareable() -> None:
+    """The protocol-info and run-mode help diff firmwares; unit-info might carry
+    the unit's id, so only its length survives -- nothing identifying leaks."""
+    coordinator = _coordinator(_export("sample.is3"), {})
+
+    diag = build_diagnostics(_entry(dict(_CONFIG)), coordinator)
+    firmware = diag["firmware"]
+
+    assert firmware["run_state_byte"] == "0x20"
+    assert firmware["protocol_info"] == "19c80200010000030102"
+    assert firmware["unit_info_len"] == 16  # bytes, from the 32 hex chars
+    assert "unit_info" not in firmware, "the raw unit-info must not be shared"
+    assert "f001" not in json.dumps(firmware), "no raw unit-info bytes leak"
+
+
+def test_firmware_fingerprint_survives_a_unit_that_said_nothing() -> None:
+    coordinator = _coordinator(_export("sample.is3"), {})
+    coordinator.client.fingerprint = {}
+
+    firmware = build_diagnostics(_entry(dict(_CONFIG)), coordinator)["firmware"]
+
+    assert firmware == {
+        "run_state_byte": None,
+        "protocol_info": None,
+        "unit_info_len": None,
+    }

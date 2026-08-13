@@ -99,6 +99,12 @@ async def snapshot(host: str, port: int, password: str) -> dict:
 
         reply = await client._send_once(proto.T_STARTSTOP, 0x03, 0x00, auth=False)
         out["state_len"] = len(reply.data) if reply else None
+        # The run-mode byte: 0x20/0x10/0x00 are known; anything else (a unit
+        # seen half-started reported 0x30) is a firmware/state difference worth
+        # catching in a diff.
+        out["run_state_byte"] = (
+            f"0x{reply.data[0]:02X}" if reply and reply.data else None
+        )
         state = proto.parse_unit_state(reply) if reply else None
         out["state_decodes"] = bool(state and state.clock)
 
