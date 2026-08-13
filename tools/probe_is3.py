@@ -202,6 +202,58 @@ def scan(new_probe, password: str) -> None:
         attempt.close()
 
 
+def try_read(probe, address: int) -> bool:
+    """Read one address, print the outcome, and return True only on a value.
+
+    Never fatal: the caller goes on to the event stream whatever this returns,
+    because a unit can refuse a read and still push the same value as an event
+    -- a different channel, and on newer firmware perhaps the only one.
+    """
+    reply = probe.ask(0x01, 0x01, 0x00, b"\x01" + struct.pack(">I", address), auth=True)
+    if reply is None:
+        print("  read: SILENT -- authorized, but no answer to a read.")
+        return False
+    if reply[0] & 0x80:
+        print("  read: REFUSED (NACK) -- authorized, but not allowed to read.")
+        return False
+    data = reply[1]
+    if len(data) < 5:
+        print(f"  read: answered empty ({len(data)} bytes) for {address:#010x}.")
+        found = sweep(probe)
+        if found:
+            print(f"     ...but {len(found)} common addresses DO have values -- the")
+            print("     data plane is open; that address was not in the project.")
+            return True
+        print("     nothing in the common ranges answered either.")
+        return False
+    raw = struct.unpack(">i", data[1:5])[0]
+    shown = "no value" if (raw & 0xFFFFFFFF) >= NO_VALUE else raw
+    print(f"  read {address:#010x} -> {shown}  (data plane OPEN)")
+    return True
+
+
+def listen_for_events(probe, seconds: float) -> dict:
+    """Collect pushed (address -> count) for ``seconds``."""
+    seen: dict[int, int] = {}
+    deadline = time.time() + seconds
+    probe.sock.settimeout(0.5)
+    while time.time() < deadline:
+        try:
+            raw, _ = probe.sock.recvfrom(4096)
+        except socket.timeout:
+            continue
+        if len(raw) < HEADER_LEN + 2 or raw[79] != 0x04 or raw[80] != 0x01:
+            continue
+        payload = raw[82:-2]
+        for i in range(payload[0] if payload else 0):
+            off = 1 + 8 * i
+            if off + 8 > len(payload):
+                break
+            addr = struct.unpack(">I", payload[off : off + 4])[0]
+            seen[addr] = seen.get(addr, 0) + 1
+    return seen
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("host")
@@ -307,96 +359,48 @@ def main(argv: list[str] | None = None) -> int:
         print("  thing to compare against a unit that works.")
         return 1
 
-    # The data plane is the real test: a unit issues a token and then ignores
-    # requests for values when the password was not the one it wanted.
+    # The value plane, tried but NEVER fatal.  On a unit that refuses reads the
+    # events may be the only channel values arrive on, so the read reports its
+    # outcome and the run goes on to the event stream regardless.
     try:
         address = int(args.read, 16) if args.read else 0x01020001
     except ValueError:
         print(f"  --read wants an address like 0x01020001, not {args.read!r}")
         probe.close()
         return 2
-    reply = probe.ask(0x01, 0x01, 0x00, b"\x01" + struct.pack(">I", address), auth=True)
-    if reply is None:
-        print("  read: SILENT -- authorized, but the unit did not answer a read.")
-        print("  Try --password if one is set.")
-        probe.close()
-        return 1
-    address_byte, data = reply
-    if address_byte & 0x80:
-        # A NACK is the unit refusing the read outright, which is a different
-        # thing from serving it with nothing in it -- and the difference is the
-        # whole question on a unit that authorizes but returns no values.  A
-        # refusal points at permission (the token, the "third party" setting,
-        # another client holding the session); an empty ACK points at the
-        # address simply not being there.
-        print("  read: REFUSED (NACK) -- the unit will not serve this read even")
-        print("  though it authorized. That points at permission, not the value:")
-        print("  the 'third party' setting in IDM3, or another client holding the")
-        print("  data session (the official integration, if one is running).")
-        probe.close()
-        return 1
-    if len(data) < 5:
-        # An ACK with no value in it.  Either the address is not in this unit's
-        # project (the default is a guess -- the first relay of a typical
-        # installation), or the data plane is not really serving values.  The
-        # sweep tells them apart.
-        print(f"  read: answered, but with no value in it ({len(data)} bytes).")
-        print(f"  Either {address:#010x} is not in this unit's project, or the")
-        print("  data plane serves no values. Checking the second:")
-        found = sweep(probe)
-        if found:
-            print(f"  ...{len(found)} of those DO have values, so the data plane is")
-            print("  open and the address above was simply not in this project.")
-        else:
-            print("  Nothing in the usual ranges answered either. This unit")
-            print("  authorizes but serves no values over 9999 -- which is worth")
-            print("  comparing against one where reads work.")
-        probe.close()
-        return 0 if found else 1
-    raw = struct.unpack(">i", data[1:5])[0]
-    shown = "no value" if (raw & 0xFFFFFFFF) >= NO_VALUE else raw
-    print(f"  read {address:#010x} -> {shown}")
-    print("  data plane OPEN")
+    read_ok = try_read(probe, address)
 
-    # Whether the unit turns its push stream on, and if not, which way it
-    # declined.  Newer firmware does not, and saying nothing is a different
-    # fault from saying no: silence suggests the request is not understood at
-    # all, a refusal means it was and the answer was still no.  This is the one
-    # thing that cannot be worked out from Home Assistant's side, and the whole
-    # difference between values arriving as they happen and waiting for a sweep.
+    # The event stream is independent of the read.  Ask for it whatever the
+    # read did: if reads are refused but events flow, the unit delivers values
+    # by push, which is a different integration entirely.
     reply = probe.ask(0x04, 0x02, 0x00, auth=True)
     if reply is None:
-        print("  event stream: NO ANSWER (asked and never replied)")
+        print("  event stream: NO ANSWER")
     elif reply[0] & 0x80:
-        print(f"  event stream: REFUSED (address byte {reply[0]:#04x}, "
-              f"body {reply[1][:16].hex() or 'empty'})")
+        print("  event stream: REFUSED (NACK)")
     else:
         print("  event stream: started")
 
-    print(f"  listening {args.listen:.0f}s for pushed events...")
-    seen: dict[int, int] = {}
-    deadline = time.time() + args.listen
-    probe.sock.settimeout(0.5)
-    while time.time() < deadline:
-        try:
-            raw, _ = probe.sock.recvfrom(4096)
-        except socket.timeout:
-            continue
-        if len(raw) < HEADER_LEN + 2 or raw[79] != 0x04 or raw[80] != 0x01:
-            continue
-        payload = raw[82:-2]
-        for i in range(payload[0] if payload else 0):
-            off = 1 + 8 * i
-            if off + 8 > len(payload):
-                break
-            addr = struct.unpack(">I", payload[off : off + 4])[0]
-            seen[addr] = seen.get(addr, 0) + 1
+    print(f"  listening {args.listen:.0f}s for pushed events"
+          f"{' -- change something to see them' if not read_ok else ''}...")
+    seen = listen_for_events(probe, args.listen)
     print(f"  {sum(seen.values())} events from {len(seen)} addresses")
-    for addr, count in sorted(seen.items(), key=lambda kv: -kv[1])[:5]:
+    for addr, count in sorted(seen.items(), key=lambda kv: -kv[1])[:8]:
         print(f"     {addr:#010x} x{count}")
-    if not seen:
-        print("     (none -- normal on a quiet installation, but if this stays")
-        print("      empty while something is changing, events are not arriving)")
+
+    # The verdict this whole run was for.
+    if read_ok:
+        print("\n  VERDICT: reads work -- the integration's poll path is fine here.")
+    elif seen:
+        print("\n  VERDICT: reads are REFUSED but values ARRIVE AS EVENTS. This unit")
+        print("  delivers values by push, not poll. The integration seeds itself")
+        print("  with a read on setup, which is the step that fails -- so the fix")
+        print("  is to seed from events instead of failing when a read is refused.")
+    else:
+        print("\n  VERDICT: reads REFUSED and no events seen. If something on the")
+        print("  installation was changing during the listen, this unit serves")
+        print("  values by neither channel over 9999. Re-run while toggling a")
+        print("  light, to be sure the quiet was not just a quiet house.")
 
     if args.write:
         probe.sock.settimeout(args.timeout)
