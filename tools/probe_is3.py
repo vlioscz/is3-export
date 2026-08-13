@@ -142,9 +142,14 @@ def sweep(probe) -> list[tuple[int, int]]:
     print(f"  trying {len(keys)} addresses every installation has:")
 
     reply = probe.ask(0x01, 0x01, 0x00, body, auth=True, retries=2)
-    if reply is None or len(reply[1]) < 1 + 4 * len(keys):
-        got = 0 if reply is None else len(reply[1])
-        print(f"     no usable answer ({got} bytes)")
+    if reply is None:
+        print("     silent -- no answer at all")
+        return []
+    if reply[0] & 0x80:
+        print("     refused (NACK) -- authorized, but not allowed to read")
+        return []
+    if len(reply[1]) < 1 + 4 * len(keys):
+        print(f"     answered, but too short to hold values ({len(reply[1])} bytes)")
         return []
 
     data = reply[1]
@@ -312,32 +317,40 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     reply = probe.ask(0x01, 0x01, 0x00, b"\x01" + struct.pack(">I", address), auth=True)
     if reply is None:
-        print("  data plane SILENT -- authorized, but the unit answers no reads.")
-        print("  That is what a wrong password looks like on this protocol.")
+        print("  read: SILENT -- authorized, but the unit did not answer a read.")
+        print("  Try --password if one is set.")
         probe.close()
         return 1
-    _, data = reply
+    address_byte, data = reply
+    if address_byte & 0x80:
+        # A NACK is the unit refusing the read outright, which is a different
+        # thing from serving it with nothing in it -- and the difference is the
+        # whole question on a unit that authorizes but returns no values.  A
+        # refusal points at permission (the token, the "third party" setting,
+        # another client holding the session); an empty ACK points at the
+        # address simply not being there.
+        print("  read: REFUSED (NACK) -- the unit will not serve this read even")
+        print("  though it authorized. That points at permission, not the value:")
+        print("  the 'third party' setting in IDM3, or another client holding the")
+        print("  data session (the official integration, if one is running).")
+        probe.close()
+        return 1
     if len(data) < 5:
-        # An answer with no value in it, which has at least two causes and this
-        # cannot tell them apart: the address may simply not be in that unit's
-        # project (the default one is a guess -- the first relay of a typical
-        # installation), or the data plane may not really be open, since the
-        # unit issues a session token for any password and only afterwards
-        # decides whether to answer.  Saying which would be guessing; earlier
-        # versions of this script guessed both ways and were wrong both times.
-        print(f"  the read was answered, but with no value in it ({len(data)} bytes).")
+        # An ACK with no value in it.  Either the address is not in this unit's
+        # project (the default is a guess -- the first relay of a typical
+        # installation), or the data plane is not really serving values.  The
+        # sweep tells them apart.
+        print(f"  read: answered, but with no value in it ({len(data)} bytes).")
         print(f"  Either {address:#010x} is not in this unit's project, or the")
-        print("  data plane is not really open -- which is what a password the")
-        print("  unit did not want looks like, since a token is handed out for")
-        print("  any password and only then does it decide whether to answer.")
+        print("  data plane serves no values. Checking the second:")
         found = sweep(probe)
         if found:
-            print(f"  ...but {len(found)} of the addresses tried DO have values,")
-            print("  so the data plane is open and the address above was simply")
-            print("  not in this project.")
+            print(f"  ...{len(found)} of those DO have values, so the data plane is")
+            print("  open and the address above was simply not in this project.")
         else:
-            print("  Nothing in the usual ranges answered either, so the data")
-            print("  plane is not open. Pass --password if one is set.")
+            print("  Nothing in the usual ranges answered either. This unit")
+            print("  authorizes but serves no values over 9999 -- which is worth")
+            print("  comparing against one where reads work.")
         probe.close()
         return 0 if found else 1
     raw = struct.unpack(">i", data[1:5])[0]
