@@ -88,6 +88,16 @@ The **device list** follows too: each cycle the unit is asked for a digest of th
 project loaded in it, and the export is re-fetched only when that digest changes
 — that is, when the installer republishes from IDM3.
 
+> **Older firmware may not turn the push stream on.** The event stream is
+> verified on IDM3 03-04-19 and newer; on an older unit — seen on **IDM3
+> 03-03-34** — the command that starts it can go unacknowledged, and the
+> diagnostics then show `events_started: false`. Nothing is wrong: connection,
+> reads, writes and control all work, and a change simply waits for the next
+> re-read instead of arriving as it happens. Where that is the case the cycle
+> runs **every 10 seconds** rather than 30, to keep the lag small. If state
+> seems to trail the wall switch, `events_started` in the diagnostics is what to
+> check.
+
 ## Installation
 
 It's in the **HACS default store**: open **HACS**, search **IS3 Export**,

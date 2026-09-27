@@ -91,6 +91,15 @@ nikdo neudělal.
 otisk projektu nahraného v jednotce a export stáhne znovu jen tehdy, když se ten
 otisk změní — tedy když technik republikuje z IDM3.
 
+> **Starší firmware nemusí push stream zapnout.** Události jsou ověřené na IDM3
+> 03-04-19 a novějším; na starší jednotce — viděno na **IDM3 03-03-34** — může
+> příkaz, který stream spouští, zůstat bez potvrzení a diagnostika pak ukáže
+> `events_started: false`. Nic není špatně: spojení, čtení, zápis i ovládání
+> fungují, změna jen počká na nejbližší obnovu místo aby dorazila hned. V tom
+> případě běží cyklus **každých 10 sekund** místo 30, aby bylo zpoždění malé.
+> Když stav zaostává za vypínačem, `events_started` v diagnostice je to, co
+> zkontrolovat.
+
 ## Instalace
 
 Je v **HACS default store**: otevři **HACS**, vyhledej **IS3 Export**, dej
