@@ -43,6 +43,18 @@ class Is3ExportAuthError(Is3ExportError):
     """The unit demanded credentials, or rejected the ones given."""
 
 
+class Is3ExportFormatError(Is3ExportError):
+    """The file parsed, but it is not an iNELS3 (.is3) export.
+
+    An ``.imm`` file -- the older format -- has entry lines this parser happily
+    reads, but no ``VERSION_..._IDM3_...`` header and no controller channels. It
+    once went in without a word and pruned every entity the controllers back
+    (thermostats, their buttons) because the new export simply did not contain
+    them. The header is the one unambiguous mark of a ``.is3``, so a file
+    without it is refused rather than classified.
+    """
+
+
 def export_url(host: str, http_port: int) -> str:
     """The URL the unit serves its export from."""
     return f"http://{host}:{http_port}{EXPORT_URL_PATH}"
@@ -116,8 +128,21 @@ def parse_export_text(payload: str, origin: str) -> Is3Export:
 
 
 def _parse(payload: str, origin: str) -> Is3Export:
-    """Parse an export, rejecting one that yielded nothing."""
+    """Parse an export, rejecting one that is not a ``.is3`` or yielded nothing.
+
+    The header check comes first and matters most: an ``.imm`` file parses into
+    entities and would quietly replace a real installation with a controller-less
+    subset of itself, deleting the thermostats and their buttons on the way. A
+    ``.is3`` always opens with ``VERSION_..._IDM3_...``; nothing else does.
+    """
     export = parse_export(payload)
+    if export.header is None or not export.header.idm3:
+        raise Is3ExportFormatError(
+            f"{origin} is not an iNELS3 (.is3) export -- it has no "
+            f"VERSION_..._IDM3_... header. An .imm file (the older format) has no "
+            f"controllers, so uploading it would drop your thermostats and their "
+            f"buttons. Save the project as .is3 from IDM3 and upload that."
+        )
     if not export.entries:
         raise Is3ExportError(f"No entries found in export from {origin}")
     return export

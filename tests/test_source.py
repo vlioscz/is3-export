@@ -143,6 +143,47 @@ def test_missing_file_is_reported(tmp_path) -> None:
 def test_empty_export_is_rejected(tmp_path) -> None:
     """A file with no entries must not be accepted as a valid export."""
     path = tmp_path / "empty.is3"
-    path.write_text("VERSION_01-03-03_ID_ABC_NAME_Test\r\n", encoding="utf-8-sig")
+    path.write_text(
+        "VERSION_01-03-03_IDM3_03-04-19_ID_ABC_NAME_Test\r\n", encoding="utf-8-sig"
+    )
     with pytest.raises(Is3ExportError, match="No entries"):
         read_export_file(path)
+
+
+# --- an .imm (or any headerless file) must be refused, not classified --------
+
+from custom_components.is3_export.source import (  # noqa: E402
+    Is3ExportFormatError,
+    parse_export_text,
+)
+
+# The real trap: a file that parses into entities but has no header and no
+# controllers.  Accepting it replaced a live installation with a thermostat-less
+# subset and deleted the climate and button entities the controllers backed.
+IMM_BODY = (
+    "Rele_kuchyne 0x01020003 0x00000000\n"
+    "Sv_obyvak 0x01040001 0x00000032 %\n"
+)
+
+
+def test_a_headerless_imm_file_is_refused() -> None:
+    with pytest.raises(Is3ExportFormatError):
+        parse_export_text(IMM_BODY, "the uploaded file")
+
+
+def test_a_header_without_idm3_is_refused() -> None:
+    """A VERSION line that is not an iNELS3 export still has no IDM3 mark."""
+    body = "VERSION_99_NAME_Something\nSv_obyvak 0x01040001 0x00000032 %\n"
+    with pytest.raises(Is3ExportFormatError):
+        parse_export_text(body, "the uploaded file")
+
+
+def test_a_real_is3_export_passes() -> None:
+    export = parse_export_text(EXPORT_BODY.decode("utf-8-sig"), "the uploaded file")
+    assert export.header is not None and export.header.idm3 == "03-04-19"
+    assert len(export.entries) == 2
+
+
+def test_the_format_error_is_an_export_error() -> None:
+    """So callers that only catch the base class still handle it."""
+    assert issubclass(Is3ExportFormatError, Is3ExportError)

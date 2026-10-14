@@ -118,6 +118,8 @@ Manually: copy `custom_components/is3_export` into `config/custom_components/`.
 | Export file path | leave empty, it downloads from the unit | empty |
 | Export file upload | for units that serve no HTTP export — drop the `.is3` saved from IDM3 here; it is kept under `config/is3_export/` | — |
 
+Only a **`.is3`** is accepted. An older **`.imm`** file carries no controllers, so uploading one in place of your export would delete every thermostat and the buttons behind them — the picker hides it, and a file without the `IDM3` header is refused outright.
+
 The integration's name comes from the export header. **The password is for the
 unit, not for the export** — the unit serves the export as a static file with no
 login; if one blocks the download anyway, upload the export or give the path to

@@ -1164,7 +1164,13 @@ def is_readable(entry: Is3Entry) -> bool:
 
 
 def parse_export(payload: str) -> Is3Export:
-    """Parse the text of a ``.is3`` or ``.imm`` export file."""
+    """Parse the lines of an export file.
+
+    Lenient on purpose -- it reads the entry lines whether or not a header is
+    present, which is what lets the ``.imm`` detection in :mod:`.source` tell a
+    headerless file apart from a real ``.is3``.  Acceptance (the header must be
+    there) is decided there, not here.
+    """
     export = Is3Export()
 
     for lineno, raw_line in enumerate(payload.splitlines(), start=1):

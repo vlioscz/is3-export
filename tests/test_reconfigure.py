@@ -141,8 +141,8 @@ def _upload_flow(files: dict[str, str]) -> Is3ConfigFlow:
     return flow
 
 
-EXPORT = "VERSION_1_ID_ABC_NAME_House\nSv_kuchyne 0x0102000A 0\n"
-SECOND = "VERSION_1_ID_ABC_NAME_House\nSv_loznice 0x0102000B 0\n"
+EXPORT = "VERSION_01-03-03_IDM3_03-04-19_ID_ABC_NAME_House\nSv_kuchyne 0x0102000A 0\n"
+SECOND = "VERSION_01-03-03_IDM3_03-04-19_ID_ABC_NAME_House\nSv_loznice 0x0102000B 0\n"
 
 
 def test_an_upload_survives_a_form_that_came_back_with_an_error() -> None:

@@ -56,6 +56,7 @@ from .export import Is3Export, is_press_button, is_readable
 from .source import (
     Is3ExportAuthError,
     Is3ExportError,
+    Is3ExportFormatError,
     async_fetch_export,
     parse_export_text,
     read_export_file,
@@ -93,7 +94,10 @@ def build_schema(defaults: dict[str, Any]) -> vol.Schema:
             # HTTP export, and this saves copying the file to the HA machine.
             # Never pre-filled -- an upload id is transient, not configuration.
             vol.Optional(CONF_EXPORT_UPLOAD): FileSelector(
-                FileSelectorConfig(accept=".is3,.imm,.txt")
+                # Only .is3 -- the picker then hides .imm and the rest, so the
+                # wrong file is not one click away. A determined "all files"
+                # pick is caught again by the header check when it is parsed.
+                FileSelectorConfig(accept=".is3")
             ),
         }
     )
@@ -279,6 +283,16 @@ class Is3ConfigFlow(ConfigFlow, domain=DOMAIN):
             # export, not a password.
             _LOGGER.debug("Export is protected: %s", err)
             errors[CONF_EXPORT_FILE] = "export_protected"
+        except Is3ExportFormatError as err:
+            # A file that parsed but is not a .is3 (an .imm, typically). Named
+            # apart from a corrupt file so the message can say what to do.
+            _LOGGER.debug("Not a .is3 export: %s", err)
+            failed = (
+                CONF_EXPORT_UPLOAD
+                if user_input.get(CONF_EXPORT_UPLOAD)
+                else CONF_EXPORT_FILE
+            )
+            errors[failed] = "wrong_export_format"
         except Is3ExportError as err:
             _LOGGER.debug("Cannot load export: %s", err)
             # Blame the field the export actually came from.

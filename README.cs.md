@@ -120,6 +120,8 @@ Ručně: zkopíruj `custom_components/is3_export` do `config/custom_components/`
 | Cesta k souboru exportu | nech prázdné, stáhne se z jednotky | prázdné |
 | Nahrání exportu | pro jednotky, které export po HTTP nenabízejí — přetáhni sem `.is3` uložený z IDM3; kopie se drží v `config/is3_export/` | — |
 
+Přijme se jen **`.is3`**. Starší soubor **`.imm`** nemá žádné controllery, takže jeho nahrání místo exportu by smazalo všechny termostaty i tlačítka za nimi — průzkumník souborů ho skryje a soubor bez hlavičky `IDM3` se odmítne rovnou.
+
 Název integrace se vezme z hlavičky exportu. **Heslo je pro jednotku, ne pro
 export** — jednotka ho nabízí jako statický soubor bez přihlášení; kdyby ho přesto nějaká jednotka blokovala, nahraj export nebo zadej
 cestu k lokálně staženému.

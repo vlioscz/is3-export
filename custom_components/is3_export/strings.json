@@ -49,6 +49,7 @@
       "export_protected": "This unit will not hand over its export. Upload the export file, or enter the path to a local copy.",
       "export_unavailable": "This unit does not serve its export over HTTP -- newer CU3 firmware does not. Upload the export file from iNELS Designer Manager, or enter the path to a copy on this machine.",
       "invalid_export": "The export could not be read or contains no entries",
+      "wrong_export_format": "This is not an iNELS3 (.is3) export. An .imm file has no controllers and would delete your thermostats and buttons. Save the project as .is3 from IDM3 and upload that.",
       "unknown": "Unexpected error"
     },
     "abort": {

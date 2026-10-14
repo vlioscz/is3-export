@@ -49,6 +49,7 @@
       "export_protected": "Tahle jednotka export nevydá. Nahraj soubor exportu, nebo zadej cestu k místní kopii.",
       "export_unavailable": "Tato jednotka export po HTTP neposkytuje – novější firmware CU3 to neumí. Nahrajte soubor exportu z iNELS Designer Manageru, nebo zadejte cestu ke kopii na tomto počítači.",
       "invalid_export": "Export se nepodařilo přečíst nebo neobsahuje žádné položky",
+      "wrong_export_format": "Tohle není export iNELS3 (.is3). Soubor .imm nemá žádné controllery a smazal by ti termostaty a tlačítka. Ulož projekt z IDM3 jako .is3 a nahraj ten.",
       "unknown": "Neočekávaná chyba"
     },
     "abort": {
