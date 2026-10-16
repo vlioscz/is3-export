@@ -157,6 +157,7 @@ class _SetpointCoordinator:
 
     def async_note_write(self, address: int, value: int) -> None:
         self.noted.append((address, value))
+        self.values[address] = value  # as the real one shows it at once
 
 
 def _climate_entity(controller, reports):
@@ -170,6 +171,7 @@ def _climate_entity(controller, reports):
     entity._attr_name = controller.name
     entity._setpoint_lock = asyncio.Lock()
     entity._setpoint_wanted = None
+    entity._setpoint_request = None
     entity.async_write_ha_state = lambda: None
     return entity
 
@@ -241,6 +243,164 @@ def test_dragging_the_slider_writes_only_the_last_value(controllers, monkeypatch
     # overtaken while it queued never reaches the unit at all.
     assert written[-1] == 800, f"the zone was left on the wrong setpoint: {written}"
     assert 1950 not in written, f"a superseded setpoint was still written: {written}"
+
+
+def test_the_asked_for_setpoint_shows_while_it_is_written(controllers, monkeypatch) -> None:
+    """The dial must not fall back to the old setpoint part-way.
+
+    Setting a temperature first switches the zone to Manual, which changes the
+    state; the dial redraws from the setpoint it is given, and if that is still
+    the old one it jumps back, then forward again once the write is confirmed.
+    """
+    import asyncio
+
+    import custom_components.is3_export.climate as climate
+
+    monkeypatch.setattr(climate, "MANUAL_SETTLE", 0)
+    monkeypatch.setattr(climate, "SETPOINT_VERIFY_DELAY", 0)
+
+    loz = controllers["TOP_loz"]
+    entity = _climate_entity(loz, reports=2150)
+    entity.coordinator.values[loz.required] = 2300  # the old setpoint
+    shown: list[float | None] = []
+    entity.async_write_ha_state = lambda: shown.append(entity.target_temperature)
+    client = entity.coordinator.client
+    original_set = client.async_set
+
+    async def watching_set(address: str, value: int) -> None:
+        shown.append(entity.target_temperature)
+        await original_set(address, value)
+
+    client.async_set = watching_set
+
+    asyncio.run(entity.async_set_temperature(temperature=21.5))
+
+    assert 23.0 not in shown, f"the old setpoint came back mid-write: {shown}"
+    assert shown[0] == 21.5, "the new setpoint must show at once"
+
+
+def test_a_refused_setpoint_puts_the_real_one_back(controllers, monkeypatch) -> None:
+    import asyncio
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    import custom_components.is3_export.climate as climate
+
+    monkeypatch.setattr(climate, "MANUAL_SETTLE", 0)
+    monkeypatch.setattr(climate, "SETPOINT_VERIFY_DELAY", 0)
+
+    loz = controllers["TOP_loz"]
+    entity = _climate_entity(loz, reports=2300)  # the zone keeps its own
+    entity.coordinator.values[loz.required] = 2300
+
+    with pytest.raises(HomeAssistantError):
+        asyncio.run(entity.async_set_temperature(temperature=21.5))
+
+    assert entity.target_temperature == 23.0
+
+
+def test_an_overtaken_setpoint_leaves_the_newer_one_showing(controllers, monkeypatch) -> None:
+    import asyncio
+
+    import custom_components.is3_export.climate as climate
+
+    monkeypatch.setattr(climate, "MANUAL_SETTLE", 0)
+    monkeypatch.setattr(climate, "SETPOINT_VERIFY_DELAY", 0)
+
+    loz = controllers["TOP_loz"]
+    entity = _climate_entity(loz, reports=None)
+    shown: list[float | None] = []
+    entity.async_write_ha_state = lambda: shown.append(entity.target_temperature)
+
+    async def drag() -> None:
+        first = asyncio.ensure_future(entity.async_set_temperature(temperature=20.0))
+        await asyncio.sleep(0)
+        await asyncio.gather(
+            entity.async_set_temperature(temperature=19.5),
+            entity.async_set_temperature(temperature=19.0),
+        )
+        await first
+
+    asyncio.run(drag())
+
+    # After the newest was asked for, nothing older may show again.
+    newest = shown.index(19.0)
+    assert all(t in (19.0, None) for t in shown[newest:]), shown
+
+
+def test_a_newer_request_for_the_same_value_is_still_written(controllers, monkeypatch) -> None:
+    """21.5 is being written; 22.0 and then 21.5 again queue behind it.  When
+    the first fails, the newest -- the same value -- must still be tried, not
+    taken for the first one finishing and silently dropped."""
+    import asyncio
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    import custom_components.is3_export.climate as climate
+
+    monkeypatch.setattr(climate, "MANUAL_SETTLE", 0)
+    monkeypatch.setattr(climate, "SETPOINT_VERIFY_DELAY", 0)
+
+    loz = controllers["TOP_loz"]
+    entity = _climate_entity(loz, reports=2300)  # the zone keeps its own
+    manual_hex = f"0x{loz.manual:08X}"
+
+    async def three() -> list:
+        first = asyncio.ensure_future(entity.async_set_temperature(temperature=21.5))
+        await asyncio.sleep(0)
+        rest = asyncio.gather(
+            entity.async_set_temperature(temperature=22.0),
+            entity.async_set_temperature(temperature=21.5),
+            return_exceptions=True,
+        )
+        return [*(await asyncio.gather(first, return_exceptions=True)), *(await rest)]
+
+    results = asyncio.run(three())
+    tries = [v for a, v in entity.coordinator.client.writes if a == manual_hex]
+
+    assert tries.count(2150) == 2 * climate.SETPOINT_ATTEMPTS, (
+        f"the newest request was dropped unwritten: {tries}"
+    )
+    assert 2200 not in tries, "the overtaken request was written"
+    assert isinstance(results[2], HomeAssistantError), "the newest one's refusal went unreported"
+
+
+def test_what_is_published_is_the_asked_for_setpoint_then_the_real_one(
+    controllers, monkeypatch
+) -> None:
+    """Checked on what reaches Home Assistant, not on the property: the new
+    setpoint is published before anything is sent, and a refusal publishes
+    the zone's own setpoint again."""
+    import asyncio
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    import custom_components.is3_export.climate as climate
+
+    monkeypatch.setattr(climate, "MANUAL_SETTLE", 0)
+    monkeypatch.setattr(climate, "SETPOINT_VERIFY_DELAY", 0)
+
+    loz = controllers["TOP_loz"]
+    entity = _climate_entity(loz, reports=2300)
+    entity.coordinator.values[loz.required] = 2300
+    entity.coordinator.values[loz.preset_select] = 7  # already Manual
+    log: list[tuple[str, float | None]] = []
+    entity.async_write_ha_state = lambda: log.append(("published", entity.target_temperature))
+    client = entity.coordinator.client
+    original_set = client.async_set
+
+    async def logged_set(address: str, value: int) -> None:
+        log.append(("sent", value))
+        await original_set(address, value)
+
+    client.async_set = logged_set
+
+    with pytest.raises(HomeAssistantError):
+        asyncio.run(entity.async_set_temperature(temperature=21.5))
+
+    assert log[0] == ("published", 21.5), f"sent before it was shown: {log[:3]}"
+    published = [t for kind, t in log if kind == "published"]
+    assert published[-1] == 23.0, f"the refused setpoint stayed published: {published}"
 
 
 def test_unique_id_is_stable(controllers) -> None:

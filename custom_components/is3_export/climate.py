@@ -108,13 +108,17 @@ class Is3Climate(CoordinatorEntity[Is3Coordinator], ClimateEntity):
         self._attr_name = controller.name.replace("_", " ")
 
         # Setting a temperature takes seconds -- it switches the zone to Manual,
-        # waits for that to settle, writes, and reads back.  Dragging the slider
-        # sends a call per step, so several of those overlap, and they used to
-        # fight: each one read back a value another had just written, decided
-        # its own write had been refused, wrote again, and eventually reported
-        # a failure for a setpoint that was simply no longer wanted.  Now they
-        # queue, and one that has been superseded steps aside.
+        # waits for that to settle, writes, and reads back.  Asking again before
+        # that is done is ordinary: the dial sends a call each time it is let
+        # go, the +/- buttons one per pause, an automation whenever it likes.
+        # Overlapping, those used to fight: each one read back a value another
+        # had just written, decided its own write had been refused, wrote
+        # again, and eventually reported a failure for a setpoint that was
+        # simply no longer wanted.  Now they queue, and one that has been
+        # superseded steps aside.
         self._setpoint_lock = asyncio.Lock()
+        self._setpoint_request: object | None = None
+        # The setpoint asked for while it is on its way; see target_temperature.
         self._setpoint_wanted: int | None = None
 
         # Cooling is offered only where the zone actually has a cooling output
@@ -163,7 +167,16 @@ class Is3Climate(CoordinatorEntity[Is3Coordinator], ClimateEntity):
 
     @property
     def target_temperature(self) -> float | None:
-        """The setpoint in force for the active mode: heat, or its own cool one."""
+        """The setpoint in force for the active mode: heat, or its own cool one.
+
+        While a setpoint is on its way -- seconds, see _async_write_setpoint --
+        it is the one asked for.  Showing the old one meanwhile is what made the
+        dial jump back: the switch to Manual lands first and changes the state,
+        and the dial, given a new state, redraws from its setpoint -- still the
+        old one -- before the new one is confirmed and it jumps forward again.
+        """
+        if self._setpoint_wanted is not None:
+            return self._setpoint_wanted / TEMP_SCALE
         if self._is_cool and self.controller.cool_required is not None:
             return self._temperature(self.controller.cool_required)
         return self._temperature(self.controller.required)
@@ -218,9 +231,10 @@ class Is3Climate(CoordinatorEntity[Is3Coordinator], ClimateEntity):
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set a target temperature.
 
-        One write at a time per zone, and only the newest one: dragging the
-        slider sends a call per step, each taking seconds, and they used to
-        overlap and overwrite each other's read-back.
+        One write at a time per zone, and only the newest one: each takes
+        seconds, and calls arriving meanwhile used to overlap and overwrite
+        each other's read-back.  The newest is also what shows, from the moment
+        it is asked for -- see target_temperature.
         """
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
@@ -245,22 +259,36 @@ class Is3Climate(CoordinatorEntity[Is3Coordinator], ClimateEntity):
         manual_hex = f"0x{manual_addr:08X}"
         required_hex = f"0x{required_addr:08X}"
 
-        # Whoever asked last is the one who meant it.
+        # Whoever asked last is the one who meant it -- and it shows from now.
+        # Who that is goes by request, not by value: two requests for the same
+        # temperature are still two, and the newer must not be taken for the
+        # older one finishing.
+        request = object()
+        self._setpoint_request = request
         self._setpoint_wanted = raw
+        self.async_write_ha_state()
 
-        async with self._setpoint_lock:
-            if self._setpoint_wanted != raw:
-                # A newer temperature was asked for while this one waited its
-                # turn.  Writing this one now would undo it.
-                _LOGGER.debug(
-                    "Dropping superseded setpoint %s °C on %s",
-                    temperature,
-                    self._attr_name,
+        try:
+            async with self._setpoint_lock:
+                if self._setpoint_request is not request:
+                    # A newer temperature was asked for while this one waited
+                    # its turn.  Writing this one now would undo it.
+                    _LOGGER.debug(
+                        "Dropping superseded setpoint %s °C on %s",
+                        temperature,
+                        self._attr_name,
+                    )
+                    return
+                await self._async_write_setpoint(
+                    temperature, raw, preset_hex, manual_hex, required_hex, required_addr
                 )
-                return
-            await self._async_write_setpoint(
-                temperature, raw, preset_hex, manual_hex, required_hex, required_addr
-            )
+        finally:
+            # The newest request settles what shows: confirmed, it is the value
+            # just noted; refused, the zone's own setpoint comes back.  One that
+            # has been overtaken leaves the newer one showing.
+            if self._setpoint_request is request:
+                self._setpoint_wanted = None
+                self.async_write_ha_state()
 
     async def _async_write_setpoint(
         self,

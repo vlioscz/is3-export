@@ -82,6 +82,7 @@ def _climate(values: dict[int, int], controller: Is3Controller | None = None) ->
     # Setpoint writes queue per zone, so the entity needs its lock even here.
     entity._setpoint_lock = asyncio.Lock()
     entity._setpoint_wanted = None
+    entity._setpoint_request = None
     entity.async_write_ha_state = lambda: None
     return entity
 
