@@ -48,6 +48,8 @@ def _coordinator(clock: _Clock, client: _Client) -> Is3Coordinator:
     coord.client = client
     coord._values = {}
     coord._pending = {}
+    coord._fades = {}
+    coord._steps = {}
     coord._updated_at = {}
     coord._address_listeners = {}
     coord._throttled = frozenset()

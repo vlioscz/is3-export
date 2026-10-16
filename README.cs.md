@@ -241,6 +241,34 @@ spínači — špatně poskládaná roleta by ovládala skutečná
 relé. Poloha se nehlásí, takže cover nese **odhadovaný stav**, a adresy, které
 si vezme žaluzie, už nevzniknou jako spínače.
 
+### Stmívače a plynulé přechody
+
+Stmívač skočí na jakoukoli hodnotu, kterou dostane. Plynulý přechod je
+v iNELS programovací funkce, ne parametr modulu, takže udělat ho v jednotce
+znamená navázat každé světlo v IDM3 na proměnné. Místo toho stmívače
+respektují vlastní **`transition`** Home Assistantu: integrace dovede výstup na
+novou hodnotu po krocích, desetkrát za sekundu, všechny právě stmívané stmívače
+v jednom paketu — scéna tak rozsvítí či ztlumí svá světla společně.
+
+- Světlo **hned ukazuje cílovou hodnotu**, jako by to dělala lampa, která
+  stmívá sama, ne každý krok cestou. Volání se vrátí, jakmile dojde první krok.
+- Nový příkaz převezme stmívání **odtud, kam už došlo** — obrácení v půlce
+  nejdřív neblikne nahoru na původní cíl.
+- Když světlem během přechodu pohne někdo jiný — tlačítko na zdi, funkce
+  v jednotce — a jednotka to ohlásí, **přechod se zastaví a platí jejich
+  změna**. Změnu, kterou další krok přepíše ještě v rámci jednoho 100ms cyklu
+  jednotky, ale nevidí nic, takže stisk uprostřed přechodu může občas přebít;
+  stačí zmáčknout znovu.
+- Aby plynule jela **každá** změna jasu, i z posuvníku, dejte světlům výchozí
+  přechod v souboru `light_profiles.csv` v konfigurační složce Home Assistantu
+  — `group.all_lights.default` pro všechna, `light.<entita>.default` pro
+  jedno:
+
+  ```csv
+  id,x,y,brightness,transition
+  group.all_lights.default,,,,1
+  ```
+
 ### Topné zóny
 
 Regulátor topení je sada kanálů se stejnou sériovou příponou plus pojmenovaný
@@ -259,6 +287,9 @@ Režim **Cool** se nabídne **jen u zóny, která má reálně zapojený chladic
 výstup** — chladicí kanály nese *každá* zóna, takže jejich přítomnost sama
 o sobě nic neznamená. Nastavení teploty přepne zónu do **Manualu**; hodnoty
 předvoleb 1–4 i týdenní plán za Schedule se nastavují v jednotce, ne tady.
+Trvá to pár sekund — přepnutí, ustálení, zápis, ověření — a zóna mezitím **už
+ukazuje teplotu, o kterou jste požádali**, takže kolečko cestou neskočí zpátky
+na tu starou; když ji jednotka nepřijme, vrátí se skutečná.
 
 Každá zóna má navíc `select` **plán** — Běžný / Prázdninový / Sváteční. Sváteční
 je **denní** program a musí být v jednotce nakonfigurovaný; kde není, přepnutí

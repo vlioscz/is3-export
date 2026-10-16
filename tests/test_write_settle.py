@@ -41,6 +41,8 @@ def _coordinator(clock: _Clock) -> Is3Coordinator:
     coord.hass = _Hass(clock)
     coord._values = {}
     coord._pending = {}
+    coord._fades = {}
+    coord._steps = {}
     coord._updated_at = {}
     coord._address_listeners = {}
     coord._throttled = frozenset()

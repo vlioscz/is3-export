@@ -37,6 +37,8 @@ ARGS = argparse.ArgumentParser(description="Home Assistant smoke test against a 
 ARGS.add_argument("host", help="the central unit's address")
 ARGS.add_argument("--password", default="", help="the unit's password, if one is set")
 ARGS.add_argument("--read-only", action="store_true", help="skip every write")
+ARGS.add_argument("--dimmer", default="", help="part of the entity id of the dimmer to drive")
+ARGS.add_argument("--zone", default="", help="part of the entity id of the heating zone to drive")
 ARGS.add_argument("--debug", action="store_true", help="log the integration's own debug output")
 OPTS = ARGS.parse_args()
 
@@ -45,7 +47,7 @@ if OPTS.debug:
     logging.getLogger("custom_components.is3_export").setLevel(logging.DEBUG)
 
 from homeassistant import config_entries  # noqa: E402
-from homeassistant.const import CONF_HOST, CONF_PORT  # noqa: E402
+from homeassistant.const import CONF_HOST, CONF_PORT, EVENT_STATE_CHANGED  # noqa: E402
 
 
 def make_entry(unique_id: str) -> config_entries.ConfigEntry:
@@ -140,6 +142,8 @@ async def exercise(hass, entry) -> int:
 
     climates = [s for s in hass.states.async_all() if s.domain == "climate"]
     print(f"\n=== HEATING ({len(climates)} zones) ===")
+    if OPTS.zone:
+        climates = [s for s in climates if OPTS.zone.lower() in s.entity_id]
     for zone in climates:
         print(f"   {zone.entity_id}: state={zone.state} "
               f"current={zone.attributes.get('current_temperature')} "
@@ -173,9 +177,33 @@ async def exercise(hass, entry) -> int:
         print(f"\ndriving {target.entity_id}: state={target.state} "
               f"current={current} setpoint={original}")
         if original is not None:
-            # Deliberately below the room temperature: proves the write without
-            # asking the building for heat.
-            wanted = float(original) + 0.5 if not restore_off else 18.0
+            preset = target.attributes.get("preset_mode")
+            # Setting a temperature writes the zone's manual setpoint, which
+            # outlives the test even once the preset is put back: read it, so
+            # it can be put back too.
+            from custom_components.is3_export.export import find_controllers
+
+            client = entry.runtime_data.client
+            controller = next(
+                (c for c in find_controllers(entry.runtime_data.data.export)
+                 if target.attributes.get("friendly_name", "").endswith(c.name.replace("_", " "))),
+                None,
+            )
+            manual_hex = f"0x{controller.manual:08X}" if controller else None
+            manual_before = await client.async_get(manual_hex) if manual_hex else None
+            # Half a degree down, and only for a few seconds: proves the write
+            # without asking the building for heat.
+            wanted = float(original) - 0.5 if not restore_off else 18.0
+            # Every setpoint the zone shows while the write is under way.  The
+            # dial redraws from each one, so the old setpoint turning up after
+            # the new one is the dial jumping back.
+            shown: list[float | None] = []
+            unsub = hass.bus.async_listen(
+                EVENT_STATE_CHANGED,
+                lambda event: event.data["entity_id"] == target.entity_id
+                and event.data["new_state"] is not None
+                and shown.append(event.data["new_state"].attributes.get("temperature")),
+            )
             t0 = time.perf_counter()
             await hass.services.async_call(
                 "climate", "set_temperature",
@@ -183,10 +211,14 @@ async def exercise(hass, entry) -> int:
                 blocking=True,
             )
             await hass.async_block_till_done()
+            unsub()
             after = hass.states.get(target.entity_id).attributes.get("temperature")
             print(f"   set {wanted} -> reads {after}  [{time.perf_counter()-t0:.2f}s]"
                   f"  {'OK' if after == wanted else 'MISMATCH'}")
             failures += after != wanted
+            bounced = wanted in shown and float(original) in shown[shown.index(wanted):]
+            print(f"   shown on the way: {shown}  {'BOUNCED' if bounced else 'OK'}")
+            failures += bounced or shown[:1] != [wanted]
             await asyncio.sleep(2)
             await hass.services.async_call(
                 "climate", "set_temperature",
@@ -197,6 +229,26 @@ async def exercise(hass, entry) -> int:
             back = hass.states.get(target.entity_id).attributes.get("temperature")
             print(f"   restored to {back}  {'OK' if back == float(original) else 'MISMATCH'}")
             failures += back != float(original)
+            # Setting a temperature switched the zone to Manual; put back the
+            # preset it was on, or a scheduled zone stays pinned.
+            if preset and preset != "Manual":
+                await hass.services.async_call(
+                    "climate", "set_preset_mode",
+                    {"entity_id": target.entity_id, "preset_mode": preset}, blocking=True,
+                )
+                await hass.async_block_till_done()
+                now = hass.states.get(target.entity_id).attributes.get("preset_mode")
+                print(f"   preset back to {now}  {'OK' if now == preset else 'MISMATCH'}")
+                failures += now != preset
+            if manual_before is not None:
+                # Not in force under a schedule, so it can simply be written.
+                await asyncio.sleep(1.5)
+                await client.async_set(manual_hex, manual_before)
+                await asyncio.sleep(1.5)
+                manual_now = await client.async_get(manual_hex)
+                print(f"   manual setpoint back to {manual_now / 100:.2f}"
+                      f"  {'OK' if manual_now == manual_before else 'MISMATCH'}")
+                failures += manual_now != manual_before
         else:
             print("   no setpoint reported; skipped")
 
@@ -215,6 +267,8 @@ async def exercise(hass, entry) -> int:
     lights = [s for s in hass.states.async_all() if s.domain == "light"]
     dimmers = [s for s in lights if s.attributes.get("supported_color_modes") == ["brightness"]]
     print(f"\n=== LIGHTS ({len(lights)} total, {len(dimmers)} dimmable) ===")
+    if OPTS.dimmer:
+        dimmers = [s for s in dimmers if OPTS.dimmer.lower() in s.entity_id]
     if dimmers:
         lamp = dimmers[0]
         was_on, was_bright = lamp.state == "on", lamp.attributes.get("brightness")
@@ -230,6 +284,33 @@ async def exercise(hass, entry) -> int:
               f"  (255 scale; 40% is ~102)  [{time.perf_counter()-t0:.2f}s]")
         failures += now.state != "on"
         await asyncio.sleep(2)
+
+        # A fade is written by the integration, step by step.  The call must
+        # return at once, the target must be all that shows, and the output
+        # must actually arrive there -- read from the register, not the state.
+        from custom_components.is3_export.light import to_brightness
+
+        shown: list[int | None] = []
+        unsub = hass.bus.async_listen(
+            EVENT_STATE_CHANGED,
+            lambda event: event.data["entity_id"] == lamp.entity_id
+            and event.data["new_state"] is not None
+            and shown.append(event.data["new_state"].attributes.get("brightness")),
+        )
+        t0 = time.perf_counter()
+        await hass.services.async_call(
+            "light", "turn_on",
+            {"entity_id": lamp.entity_id, "brightness_pct": 70, "transition": 2},
+            blocking=True,
+        )
+        took = time.perf_counter() - t0
+        await asyncio.sleep(2.5)
+        unsub()
+        register = await entry.runtime_data.client.async_get(lamp.attributes["address"])
+        fade_ok = took < 0.6 and register == 70 and set(shown) == {to_brightness(70)}
+        print(f"   fade 40% -> 70% over 2s: returned in {took*1000:.0f} ms, shown {shown},"
+              f" register {register}  {'OK' if fade_ok else 'MISMATCH'}")
+        failures += not fade_ok
         if was_on and was_bright:
             await hass.services.async_call(
                 "light", "turn_on",

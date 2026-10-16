@@ -238,6 +238,34 @@ left as two switches — a wrong pairing there would drive real relays. No form
 reports its position, so a cover carries an **assumed state**, and addresses
 taken by a blind no longer appear as switches.
 
+### Dimmers and fades
+
+A dimmer jumps to whatever level it is given. On iNELS a fade is a programming
+function, not a module setting, so making a light glide in the unit itself means
+wiring every light to variables in IDM3. Instead, dimmers honour Home
+Assistant's own **`transition`**: the integration walks the output to the new
+level, ten steps a second, every fading dimmer in the same packet — so a scene
+fades its lights together.
+
+- The light **shows its target at once**, as a lamp that fades itself would,
+  not each step on the way. The call returns as soon as the first step lands.
+- A new command takes over from **wherever the fade has got to** — reversing
+  half-way does not flash up to the old target first.
+- If someone else moves the light while it fades — a wall button, a function in
+  the unit — and the unit reports it, **the fade stops and theirs stands**. A
+  change that the next step overwrites within the unit's own 100 ms cycle cannot
+  be seen by anything, though, so a press in the middle of a fade can now and
+  then be undone by it; press again.
+- To make **every** brightness change glide, the slider included, give lights a
+  default transition in `light_profiles.csv` in the Home Assistant config
+  folder — `group.all_lights.default` for all of them, `light.<entity>.default`
+  for one:
+
+  ```csv
+  id,x,y,brightness,transition
+  group.all_lights.default,,,,1
+  ```
+
 ### Heating zones
 
 A heating controller is a set of channels with the same serial suffix plus a
@@ -255,7 +283,10 @@ named root `<name> Controller_<serial>`. Together they form one `climate` entity
 **Cool** is offered **only for a zone that actually has a cooling output wired**
 — every zone carries the cooling channels, so their presence alone means nothing.
 Setting the temperature switches the zone into **Manual**; preset values 1–4 and
-the weekly plan behind Schedule are set on the unit, not here.
+the weekly plan behind Schedule are set on the unit, not here. That takes a few
+seconds — switch, settle, write, confirm — and meanwhile the zone **already
+shows the temperature you asked for**, so the dial does not jump back to the old
+one on the way; if the unit refuses it, the real setpoint comes back.
 
 Each zone also has a `select` **plan** — Normal / Vacation / Holiday. Holiday is
 a **daily** program and must be configured on the unit; where it isn't, the

@@ -48,6 +48,8 @@ def _coord(throttled: set[int]):
     coord._values = {}
     coord._updated_at = {}
     coord._pending = {}
+    coord._fades = {}
+    coord._steps = {}
     coord._address_listeners = {}
     coord._throttled = frozenset(throttled)
     coord._notified_at = {}
